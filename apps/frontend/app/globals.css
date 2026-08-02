@@ -1,0 +1,40 @@
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+::selection { background: #cdeee9; }
+
+/* Custom scrollbar — thin, quiet, matches the panel palette */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #c7d0da;
+  border-radius: 999px;
+  border: 2px solid #f4f6f8;
+}
+::-webkit-scrollbar-thumb:hover { background: #aab6c2; }
+
+/* Message entrance — a small lift + fade, not a slide from off-screen */
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Live status indicator — expanding radar ring */
+@keyframes radarPing {
+  0% { transform: scale(1); opacity: 0.6; }
+  75%, 100% { transform: scale(2.8); opacity: 0; }
+}
+
+/* Typing indicator dots */
+@keyframes bounceDot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

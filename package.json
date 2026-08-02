@@ -1,0 +1,14 @@
+{
+  "name": "ai-assistant-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["apps/backend", "apps/frontend"],
+  "scripts": {
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "migrate": "npm run migrate --workspace=apps/backend",
+    "dev:backend": "npm run dev --workspace=apps/backend",
+    "dev:frontend": "npm run dev --workspace=apps/frontend",
+    "dev:mcp": "npm run dev --workspace=apps/mcp-gmail-calendar"
+  }
+}

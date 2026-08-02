@@ -1,0 +1,70 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage
+coverage/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+.next
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# TypeScript
+*.tsbuildinfo
+
+# PM2
+.pm2/
+
+# NestJS CLI cache
+.nestjs/
+
+# Temporary files
+tmp/
+temp/
+
+# Uploads (if applicable)
+uploads/
+
+# Prisma (if using Prisma)
+prisma/dev.db
+prisma/dev.db-journal
+
+# SQLite
+*.sqlite
+*.sqlite3
+
+# Testing
+.junit.xml
+
+# Misc
+.cache/
