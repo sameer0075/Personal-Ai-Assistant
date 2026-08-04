@@ -12,7 +12,11 @@ import Sidebar from "@/components/Sidebar";
 import GoogleConnectCard from "@/components/GoogleConnectCard";
 import GmailPanel from "@/components/GmailPanel";
 import CalendarPanel from "@/components/CalendarPanel";
+import LinkedInConnectCard from "@/components/LinkedInConnectCard";
+import LinkedInPanel from "@/components/LinkedInPanel";
 import { tokens } from "@/lib/theme";
+
+const OAUTH_CALLBACK_PARAMS = ["google", "linkedin"] as const;
 
 export default function IntegrationsView() {
   const searchParams = useSearchParams();
@@ -20,14 +24,18 @@ export default function IntegrationsView() {
   const [callbackNote, setCallbackNote] = useState<{ message: string; severity: "success" | "error" } | null>(null);
 
   useEffect(() => {
-    const googleParam = searchParams.get("google");
-    if (googleParam === "connected") {
-      setCallbackNote({ message: "Google account connected.", severity: "success" });
-    } else if (googleParam === "error") {
-      setCallbackNote({ message: "Failed to connect Google account. Please try again.", severity: "error" });
-    }
-    if (googleParam) {
+    for (const provider of OAUTH_CALLBACK_PARAMS) {
+      const value = searchParams.get(provider);
+      if (!value) continue;
+
+      const label = provider === "google" ? "Google" : "LinkedIn";
+      setCallbackNote(
+        value === "connected"
+          ? { message: `${label} account connected.`, severity: "success" }
+          : { message: `Failed to connect ${label} account. Please try again.`, severity: "error" }
+      );
       router.replace("/integrations"); // strip the query param so a refresh doesn't re-show the toast
+      break;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -54,6 +62,8 @@ export default function IntegrationsView() {
             <GoogleConnectCard />
             <GmailPanel />
             <CalendarPanel />
+            <LinkedInConnectCard />
+            <LinkedInPanel />
           </Stack>
         </Container>
       </Box>

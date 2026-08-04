@@ -15,6 +15,11 @@ const envSchema = z.object({
 
   GOOGLE_API_KEY: z.string().min(1, "GOOGLE_API_KEY is required (free key at aistudio.google.com/apikey)"),
   GEMINI_MODEL: z.string().default("gemini-3.1-flash-lite"),
+  // "Nano Banana" - free tier up to 500 images/day as of writing. Imagen models
+  // are being deprecated (Aug 2026), so this multimodal generateContent path is
+  // the current, supported way to get images out of Gemini - not a separate
+  // Imagen model.
+  GEMINI_IMAGE_MODEL: z.string().default("gemini-2.5-flash-image"),
 
   EMBEDDING_MODEL: z.string().default("Xenova/all-MiniLM-L6-v2"),
   EMBEDDING_DIMENSIONS: z.coerce.number().default(384),
@@ -30,12 +35,29 @@ const envSchema = z.object({
   GOOGLE_TOKEN_ENCRYPTION_KEY: z
     .string()
     .length(64, "GOOGLE_TOKEN_ENCRYPTION_KEY must be a 64-char hex string (32 bytes)"),
+
+  // --- LinkedIn OAuth (posting) ---
+  LINKEDIN_OAUTH_CLIENT_ID: z.string().min(1, "LINKEDIN_OAUTH_CLIENT_ID is required"),
+  LINKEDIN_OAUTH_CLIENT_SECRET: z.string().min(1, "LINKEDIN_OAUTH_CLIENT_SECRET is required"),
+  LINKEDIN_OAUTH_REDIRECT_URI: z.string().default("http://localhost:4000/api/linkedin/callback"),
+  // Separate key from Google's - can be the same value or a freshly generated one, your call.
+  LINKEDIN_TOKEN_ENCRYPTION_KEY: z
+    .string()
+    .length(64, "LINKEDIN_TOKEN_ENCRYPTION_KEY must be a 64-char hex string (32 bytes)"),
+  // LinkedIn versions its API by calendar month (YYYYMM), each supported ~1-2 years.
+  // NOTE: this value is unused in the backend itself - kept only so .env.example stays
+  // self-documenting. The one that actually matters is apps/mcp-linkedin's copy.
+  // Check for a newer version occasionally: https://learn.microsoft.com/en-us/linkedin/marketing/versioning
+  LINKEDIN_API_VERSION: z.string().default("202607"),
+
   FRONTEND_BASE_URL: z.string().default("http://localhost:3000"),
 
-  // --- MCP server (Gmail/Calendar tool provider) ---
-  // How the backend spawns the MCP server as a child process over stdio.
-  MCP_SERVER_COMMAND: z.string().default("npx"),
-  MCP_SERVER_ARGS: z.string().default("tsx ../mcp-gmail-calendar/src/server.ts"),
+  // --- MCP servers (one entry per external service the agent can act on) ---
+  // How the backend spawns each MCP server as a child process over stdio.
+  MCP_GMAIL_CALENDAR_SERVER_COMMAND: z.string().default("npx"),
+  MCP_GMAIL_CALENDAR_SERVER_ARGS: z.string().default("tsx ../mcp-gmail-calendar/src/server.ts"),
+  MCP_LINKEDIN_SERVER_COMMAND: z.string().default("npx"),
+  MCP_LINKEDIN_SERVER_ARGS: z.string().default("tsx ../mcp-linkedin/src/server.ts"),
 });
 
 const parsed = envSchema.safeParse(process.env);

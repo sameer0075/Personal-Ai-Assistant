@@ -3,36 +3,64 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { env } from "../../config/env.js";
 
 /**
- * The backend talks to Gmail/Calendar exclusively through the MCP server in
- * apps/mcp-gmail-calendar - it never calls googleapis directly. This keeps
- * "how to talk to Google" in exactly one place, callable identically by the
- * LangGraph agent (as bound tools) and by plain REST routes (as direct calls).
- *
- * Transport: stdio. The backend spawns the MCP server as a child process and
- * speaks MCP over its stdin/stdout - no network port, no auth handshake of
- * its own to manage locally.
+ * The backend talks to every external service (Gmail/Calendar, LinkedIn, and
+ * whatever comes next - GitHub/Bitbucket, etc.) exclusively through MCP
+ * servers - it never calls their SDKs/APIs directly. This registry is what
+ * lets that scale past a single server: each entry is one MCP server process,
+ * and tool calls are routed to whichever server actually exposes that tool.
+ * Adding a new integration means adding one entry here, not touching the
+ * agent, the routes, or anything else that calls `callMcpTool`.
  */
-let clientPromise: Promise<Client> | null = null;
-
-async function connect(): Promise<Client> {
-  const client = new Client({ name: "personal-assistant-backend", version: "0.1.0" });
-
-  const [command, ...args] = [env.MCP_SERVER_COMMAND, ...env.MCP_SERVER_ARGS.split(" ").filter(Boolean)];
-  const transport = new StdioClientTransport({ command, args });
-
-  await client.connect(transport);
-  console.log("✅ connected to MCP server (gmail/calendar)");
-  return client;
+interface McpServerConfig {
+  id: string;
+  command: string;
+  args: string[];
 }
 
-export async function getMcpClient(): Promise<Client> {
-  if (!clientPromise) {
-    clientPromise = connect().catch((err) => {
-      clientPromise = null; // allow retry on next call instead of caching a rejected promise forever
+const MCP_SERVER_CONFIGS: McpServerConfig[] = [
+  {
+    id: "gmail-calendar",
+    command: env.MCP_GMAIL_CALENDAR_SERVER_COMMAND,
+    args: env.MCP_GMAIL_CALENDAR_SERVER_ARGS.split(" ").filter(Boolean),
+  },
+  {
+    id: "linkedin",
+    command: env.MCP_LINKEDIN_SERVER_COMMAND,
+    args: env.MCP_LINKEDIN_SERVER_ARGS.split(" ").filter(Boolean),
+  },
+];
+
+interface ConnectedServer {
+  id: string;
+  client: Client;
+}
+
+let connectPromise: Promise<ConnectedServer[]> | null = null;
+// Populated lazily from listMcpTools() - maps a tool name to the server that owns it,
+// so callMcpTool doesn't need to search every server on every call.
+let toolOwner: Map<string, Client> | null = null;
+
+async function connectAll(): Promise<ConnectedServer[]> {
+  const servers = await Promise.all(
+    MCP_SERVER_CONFIGS.map(async (cfg): Promise<ConnectedServer> => {
+      const client = new Client({ name: `personal-assistant-backend-${cfg.id}`, version: "0.1.0" });
+      const transport = new StdioClientTransport({ command: cfg.command, args: cfg.args });
+      await client.connect(transport);
+      console.log(`✅ connected to MCP server: ${cfg.id}`);
+      return { id: cfg.id, client };
+    })
+  );
+  return servers;
+}
+
+async function getConnectedServers(): Promise<ConnectedServer[]> {
+  if (!connectPromise) {
+    connectPromise = connectAll().catch((err) => {
+      connectPromise = null; // allow retry on next call instead of caching a rejected promise forever
       throw err;
     });
   }
-  return clientPromise;
+  return connectPromise;
 }
 
 export interface McpToolDescriptor {
@@ -41,15 +69,35 @@ export interface McpToolDescriptor {
   inputSchema: Record<string, unknown>;
 }
 
+/** Lists every tool across every connected MCP server, and (re)builds the tool -> server routing map. */
 export async function listMcpTools(): Promise<McpToolDescriptor[]> {
-  const client = await getMcpClient();
-  const { tools } = await client.listTools();
-  return tools;
+  const servers = await getConnectedServers();
+  const ownerMap = new Map<string, Client>();
+  const allTools: McpToolDescriptor[] = [];
+
+  for (const server of servers) {
+    const { tools } = await server.client.listTools();
+    for (const t of tools) {
+      ownerMap.set(t.name, server.client);
+      allTools.push(t);
+    }
+  }
+
+  toolOwner = ownerMap;
+  return allTools;
 }
 
-/** Calls an MCP tool and returns its text content, throwing if the tool reported an error. */
+/** Calls an MCP tool (on whichever server exposes it) and returns its text content, throwing on tool-reported errors. */
 export async function callMcpTool(name: string, args: Record<string, unknown>): Promise<string> {
-  const client = await getMcpClient();
+  if (!toolOwner) {
+    await listMcpTools();
+  }
+
+  const client = toolOwner?.get(name);
+  if (!client) {
+    throw new Error(`No connected MCP server exposes a tool named "${name}"`);
+  }
+
   const result = await client.callTool({ name, arguments: args });
 
   const content = (result.content ?? []) as Array<{ type: string; text?: string }>;

@@ -30,6 +30,12 @@ interface CalendarEventSummary {
   attendees: string[];
 }
 
+interface LinkedinPostSummary {
+  postUrn: string;
+  commentary: string;
+  publishedAt: string;
+}
+
 /**
  * Pulls recent Gmail messages (via the MCP server) and indexes any not
  * already in the vector store, so the chat agent's `search_knowledge_base`
@@ -112,4 +118,37 @@ export async function syncCalendarToRag(
   }
 
   return { found: events.length, ingested, skipped };
+}
+
+/**
+ * Pulls the assistant's own record of recently-published LinkedIn posts (see
+ * linkedin_list_recent_posts / the linkedin_posts table - LinkedIn's API
+ * won't give this back to us) and indexes any not already in the vector
+ * store. This is what lets the agent check its own past posts for tone/topic
+ * consistency before drafting new ones, via search_knowledge_base.
+ */
+export async function syncLinkedinToRag(params: { maxResults?: number } = {}): Promise<SyncSummary> {
+  const listJson = await callMcpTool("linkedin_list_recent_posts", { maxResults: params.maxResults ?? 20 });
+  const posts: LinkedinPostSummary[] = JSON.parse(listJson);
+
+  let ingested = 0;
+  let skipped = 0;
+
+  for (const post of posts) {
+    const existing = await documentRepository.findByExternalId("linkedin", post.postUrn);
+    if (existing) {
+      skipped++;
+      continue;
+    }
+
+    await ingestText({
+      title: post.commentary.slice(0, 60) || "(untitled post)",
+      text: `Published: ${post.publishedAt}\n\n${post.commentary}`,
+      sourceType: "linkedin",
+      metadata: { externalId: post.postUrn, publishedAt: post.publishedAt },
+    });
+    ingested++;
+  }
+
+  return { found: posts.length, ingested, skipped };
 }
