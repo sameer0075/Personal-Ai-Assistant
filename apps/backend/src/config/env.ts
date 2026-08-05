@@ -58,6 +58,8 @@ const envSchema = z.object({
   MCP_GMAIL_CALENDAR_SERVER_ARGS: z.string().default("tsx ../mcp-gmail-calendar/src/server.ts"),
   MCP_LINKEDIN_SERVER_COMMAND: z.string().default("npx"),
   MCP_LINKEDIN_SERVER_ARGS: z.string().default("tsx ../mcp-linkedin/src/server.ts"),
+  MCP_WEB_SEARCH_SERVER_COMMAND: z.string().default("npx"),
+  MCP_WEB_SEARCH_SERVER_ARGS: z.string().default("tsx ../mcp-web-search/src/server.ts"),
 });
 
 const parsed = envSchema.safeParse(process.env);

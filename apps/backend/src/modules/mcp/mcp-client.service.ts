@@ -28,6 +28,11 @@ const MCP_SERVER_CONFIGS: McpServerConfig[] = [
     command: env.MCP_LINKEDIN_SERVER_COMMAND,
     args: env.MCP_LINKEDIN_SERVER_ARGS.split(" ").filter(Boolean),
   },
+  {
+    id: "web-search",
+    command: env.MCP_WEB_SEARCH_SERVER_COMMAND,
+    args: env.MCP_WEB_SEARCH_SERVER_ARGS.split(" ").filter(Boolean),
+  },
 ];
 
 interface ConnectedServer {

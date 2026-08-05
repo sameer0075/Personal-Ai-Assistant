@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import TextareaAutosize from "@mui/material/TextareaAutosize";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+import "highlight.js/styles/github-dark.css"
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import Container from "@mui/material/Container";
@@ -187,7 +192,7 @@ export default function Home() {
 
         {/* Chat area */}
         <Box sx={{ flex: 1, overflowY: "auto" }}>
-          <Container maxWidth="sm" sx={{ py: 4, height: "100%" }}>
+          <Container maxWidth="md" sx={{ py: 4, height: "100%" }}>
             {messages.length === 0 ? (
               <Stack sx={{ height: "100%", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
                 <Box
@@ -281,7 +286,7 @@ export default function Home() {
 
         {/* Composer */}
         <Box sx={{ px: 3, pb: 3, pt: 1 }}>
-          <Container maxWidth="sm" disableGutters>
+          <Container maxWidth="md" disableGutters>
             <Paper
               component="form"
               onSubmit={handleAsk}
@@ -303,6 +308,9 @@ export default function Home() {
               <TextField
                 inputRef={inputRef}
                 fullWidth
+                multiline
+                minRows={1}
+                maxRows={12}
                 variant="standard"
                 autoComplete="off"
                 placeholder="Ask something, or tell it to send an email / schedule something…"
@@ -410,18 +418,155 @@ function MessageBubble({ message }: { message: Message }) {
         elevation={0}
         sx={{
           p: 1.75,
-          maxWidth: "78%",
+          maxWidth: isUser ? "75%" : "80%",
+width: isUser ? "fit-content" : "100%",
           borderRadius: isUser ? "14px 4px 14px 14px" : "4px 14px 14px 14px",
           border: `1px solid ${message.isError ? tokens.danger : isUser ? tokens.userBorder : tokens.border}`,
           bgcolor: message.isError ? tokens.dangerDim : isUser ? tokens.userTint : tokens.panel,
         }}
       >
-        <Typography
-          variant="body2"
-          sx={{ whiteSpace: "pre-wrap", color: message.isError ? tokens.danger : tokens.text }}
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          rehypePlugins={[rehypeHighlight]}
+          components={{
+            p: ({ children }) => (
+              <Typography
+                variant="body2"
+                sx={{
+                  color: message.isError ? tokens.danger : tokens.text,
+                  mb: 1.5,
+                  lineHeight: 1.7,
+                }}
+              >
+                {children}
+              </Typography>
+            ),
+
+            h1: ({ children }) => (
+              <Typography variant="h4" sx={{ mt: 2, mb: 1, fontWeight: 700 }}>
+                {children}
+              </Typography>
+            ),
+
+            h2: ({ children }) => (
+              <Typography variant="h5" sx={{ mt: 2, mb: 1, fontWeight: 700 }}>
+                {children}
+              </Typography>
+            ),
+
+            h3: ({ children }) => (
+              <Typography variant="h6" sx={{ mt: 2, mb: 1, fontWeight: 700 }}>
+                {children}
+              </Typography>
+            ),
+
+            ul: ({ children }) => (
+              <Box component="ul" sx={{ pl: 3, mb: 2 }}>
+                {children}
+              </Box>
+            ),
+
+            ol: ({ children }) => (
+              <Box component="ol" sx={{ pl: 3, mb: 2 }}>
+                {children}
+              </Box>
+            ),
+
+            li: ({ children }) => (
+              <Box component="li" sx={{ mb: 0.5 }}>
+                {children}
+              </Box>
+            ),
+
+            blockquote: ({ children }) => (
+              <Box
+                sx={{
+                  borderLeft: "4px solid #4f46e5",
+                  pl: 2,
+                  my: 2,
+                  color: "text.secondary",
+                  fontStyle: "italic",
+                }}
+              >
+                {children}
+              </Box>
+            ),
+
+            code({ inline, className, children, ...props }: any) {
+              if (inline) {
+                return (
+                  <Box
+                    component="code"
+                    sx={{
+                      px: 0.6,
+                      py: 0.2,
+                      borderRadius: 1,
+                      bgcolor: "#2d2d2d",
+                      color: "#ffcb6b",
+                      fontFamily: "monospace",
+                      fontSize: "0.9em",
+                    }}
+                    {...props}
+                  >
+                    {children}
+                  </Box>
+                );
+              }
+
+              return (
+                <Box
+                  component="pre"
+                  sx={{
+                    p: 2,
+                    borderRadius: 2,
+                    overflowX: "auto",
+                    bgcolor: "#0d1117",
+                    my: 2,
+                  }}
+                >
+                  <code className={className} {...props}>
+                    {children}
+                  </code>
+                </Box>
+              );
+            },
+
+            table: ({ children }) => (
+              <Box
+                component="table"
+                sx={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  my: 2,
+                  "& th, & td": {
+                    border: "1px solid #444",
+                    p: 1,
+                  },
+                  "& th": {
+                    bgcolor: "#222",
+                  },
+                }}
+              >
+                {children}
+              </Box>
+            ),
+
+            a: ({ children, href }) => (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  color: "#60a5fa",
+                }}
+              >
+                {children}
+              </a>
+            ),
+          }}
         >
           {message.content}
-        </Typography>
+        </ReactMarkdown>
 
         {message.toolCalls && message.toolCalls.length > 0 && (
           <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap", mt: 1.5 }}>
