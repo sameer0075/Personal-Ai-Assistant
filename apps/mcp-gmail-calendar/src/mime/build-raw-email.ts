@@ -3,6 +3,13 @@ interface EmailInput {
   subject: string;
   body: string;
   cc?: string;
+  attachment?: Attachment
+}
+
+interface Attachment {
+  filename: string;
+  mimeType: string;
+  base64Data: string;
 }
 
 /** Base64url encoding (RFC 4648 §5) - Gmail's API rejects standard base64 padding/chars. */
@@ -22,16 +29,46 @@ function encodeSubject(subject: string): string {
  * proper MIME multipart builder is straightforward to add here later without
  * touching any of the calling code.
  */
-export function buildRawEmail({ to, subject, body, cc }: EmailInput): string {
+export function buildRawEmail(params: {
+  to: string;
+  subject: string;
+  body: string;
+  cc?: string;
+  attachment?: Attachment; // NEW
+}): string {
+  const boundary = `boundary_${Date.now()}`;
   const headers = [
-    `To: ${to}`,
-    cc ? `Cc: ${cc}` : null,
-    `Subject: ${encodeSubject(subject)}`,
+    `To: ${params.to}`,
+    params.cc ? `Cc: ${params.cc}` : null,
+    `Subject: ${params.subject}`,
     "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset="UTF-8"',
-    "Content-Transfer-Encoding: 7bit",
-  ].filter((line): line is string => line !== null);
+  ].filter(Boolean);
 
-  const message = [...headers, "", body].join("\r\n");
-  return toBase64Url(message);
+  let message: string;
+
+  if (params.attachment) {
+    headers.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+    message = [
+      headers.join("\r\n"),
+      "",
+      `--${boundary}`,
+      'Content-Type: text/plain; charset="UTF-8"',
+      "",
+      params.body,
+      "",
+      `--${boundary}`,
+      `Content-Type: ${params.attachment.mimeType}; name="${params.attachment.filename}"`,
+      `Content-Disposition: attachment; filename="${params.attachment.filename}"`,
+      "Content-Transfer-Encoding: base64",
+      "",
+      params.attachment.base64Data,
+      "",
+      `--${boundary}--`,
+    ].join("\r\n");
+  } else {
+    headers.push('Content-Type: text/plain; charset="UTF-8"');
+    message = `${headers.join("\r\n")}\r\n\r\n${params.body}`;
+  }
+
+  return Buffer.from(message).toString("base64url");
 }

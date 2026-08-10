@@ -14,6 +14,7 @@ export interface IngestTextParams {
   title: string;
   sourceType: SourceType;
   metadata?: Record<string, unknown>;
+  file?: { data: Buffer; mimeType: string };
 }
 
 /**
@@ -25,16 +26,12 @@ export interface IngestTextParams {
  * every module instead of each module reinventing chunk/embed/store.
  */
 export async function ingestText(params: IngestTextParams): Promise<IngestResult> {
-  const { text, title, sourceType, metadata = {} } = params;
-
-  if (!text.trim()) {
-    throw new Error(`No text to ingest for "${title}"`);
-  }
+  const { text, title, sourceType, metadata = {}, file } = params;
+  if (!text.trim()) throw new Error(`No text to ingest for "${title}"`);
 
   const chunks = chunkText(text);
   const embeddings = await embeddingService.embedBatch(chunks);
-
-  const document = await documentRepository.createDocument(title, sourceType, metadata);
+  const document = await documentRepository.createDocument(title, sourceType, metadata, file); // pass file through
 
   await documentRepository.insertChunks(
     document.id,

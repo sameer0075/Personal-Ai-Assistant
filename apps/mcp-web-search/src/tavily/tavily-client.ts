@@ -38,7 +38,7 @@ export async function search(params: {
     headers: commonHeaders(),
     body: JSON.stringify({
       query: params.query,
-      search_depth: "basic", // "advanced" costs 2 credits/request instead of 1 - basic is enough for chat-agent lookups
+      search_depth: "advanced", // "advanced" costs 2 credits/request instead of 1 - basic is enough for chat-agent lookups
       max_results: params.maxResults ?? 5,
       topic: params.topic ?? "general",
       include_answer: params.includeAnswer ?? true,

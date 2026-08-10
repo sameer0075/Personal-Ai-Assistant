@@ -10,9 +10,20 @@ export interface GmailMessageSummary {
   snippet: string;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 export interface GmailMessageFull extends GmailMessageSummary {
   to: string;
   body: string;
+}
+
+export interface BulkSendResult {
+  to: string;
+  sent: boolean;
+  id?: string;
+  threadId?: string;
+  error?: string;
 }
 
 async function getGmailClient(): Promise<gmail_v1.Gmail> {
@@ -102,6 +113,7 @@ export async function sendMessage(params: {
   subject: string;
   body: string;
   cc?: string;
+  attachment?: { filename: string; mimeType: string; base64Data: string };
 }): Promise<{ id: string; threadId: string }> {
   const gmail = await getGmailClient();
   const raw = buildRawEmail(params);
@@ -109,4 +121,27 @@ export async function sendMessage(params: {
   const { data } = await gmail.users.messages.send({ userId: "me", requestBody: { raw } });
 
   return { id: data.id!, threadId: data.threadId! };
+}
+
+export async function sendBulkMessages(params: {
+  recipients: string[];
+  subject: string;
+  body: string;
+  attachment?: { filename: string; mimeType: string; base64Data: string };
+  delayMs?: number;
+}): Promise<BulkSendResult[]> {
+  const { recipients, subject, body, attachment, delayMs = 1500 } = params;
+  const results: BulkSendResult[] = [];
+
+  for (const to of recipients) {
+    try {
+      const result = await sendMessage({ to, subject, body, attachment });
+      results.push({ to, sent: true, ...result });
+    } catch (err) {
+      results.push({ to, sent: false, error: err instanceof Error ? err.message : "Unknown error" });
+    }
+    await delay(delayMs); // pace sends - avoids tripping Gmail's spam/abuse detection
+  }
+
+  return results;
 }

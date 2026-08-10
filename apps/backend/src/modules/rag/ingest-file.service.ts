@@ -3,8 +3,6 @@ import { documentRepository } from "./document.repository.js";
 import { ingestText, type IngestResult } from "./ingest-text.service.js";
 import type { SourceType } from "../../types/index.js";
 
-export type { IngestResult } from "./ingest-text.service.js";
-
 const MIME_BY_EXTENSION: Record<string, string> = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -15,10 +13,7 @@ function mimeTypeFor(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   return MIME_BY_EXTENSION[ext] ?? "application/octet-stream";
 }
-/**
- * File-specific entry point into the shared ingestion pipeline: extract text
- * from the upload (pdf/docx/txt), then hand off to `ingestText`.
- */
+
 export async function ingestFile(params: {
   buffer: Buffer;
   filename: string;
@@ -38,6 +33,6 @@ export async function ingestFile(params: {
     title: filename,
     sourceType,
     metadata: { originalFilename: filename },
-    file: { data: buffer, mimeType: mimeTypeFor(filename) }
+    file: { data: buffer, mimeType: mimeTypeFor(filename) }, // NEW — this is the fix
   });
 }

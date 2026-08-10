@@ -10,6 +10,13 @@ const listQuerySchema = z.object({
   maxResults: z.coerce.number().int().min(1).max(50).default(20),
 });
 
+const bulkSendSchema = z.object({
+  recipients: z.array(z.string().email()).min(1).max(200),
+  subject: z.string().min(1),
+  body: z.string().min(1),
+  attachCv: z.boolean().optional(),
+});
+
 /** GET /api/gmail/messages?query=...&maxResults=20 */
 gmailRoutes.get("/messages", async (req, res) => {
   try {
@@ -36,6 +43,7 @@ const sendSchema = z.object({
   subject: z.string().min(1),
   body: z.string().min(1),
   cc: z.string().email().optional(),
+  attachCv: z.boolean().optional(),
 });
 
 /** POST /api/gmail/send - Body: { to, subject, body, cc? } */
@@ -66,5 +74,15 @@ gmailRoutes.post("/sync-to-rag", async (req, res) => {
     res.json(summary);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to sync Gmail to RAG" });
+  }
+});
+
+gmailRoutes.post("/send-bulk", async (req, res) => {
+  try {
+    const input = bulkSendSchema.parse(req.body);
+    const json = await callMcpTool("gmail_send_bulk", input);
+    res.status(201).json(JSON.parse(json));
+  } catch (err) {
+    res.status(422).json({ error: err instanceof Error ? err.message : "Failed to send bulk messages" });
   }
 });

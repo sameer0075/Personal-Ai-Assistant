@@ -8,12 +8,17 @@ function toVectorLiteral(embedding: number[]): string {
 }
 
 export const documentRepository = {
-  async createDocument(title: string, sourceType: SourceType, metadata: Record<string, unknown> = {}): Promise<DocumentRecord> {
+  async createDocument(
+    title: string,
+    sourceType: SourceType,
+    metadata: Record<string, unknown> = {},
+    file?: { data: Buffer; mimeType: string }
+  ): Promise<DocumentRecord> {
     const { rows } = await pool.query<DocumentRecord>(
-      `INSERT INTO documents (title, source_type, metadata)
-       VALUES ($1, $2, $3)
-       RETURNING id, title, source_type, metadata, created_at`,
-      [title, sourceType, metadata]
+      `INSERT INTO documents (title, source_type, metadata, file_data, mime_type)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, title, source_type, metadata, created_at`,
+      [title, sourceType, metadata, file?.data ?? null, file?.mimeType ?? null]
     );
     return rows[0];
   },
@@ -37,6 +42,20 @@ export const documentRepository = {
        VALUES ${rowsSql.join(", ")}`,
       values
     );
+  },
+
+  async getLatestFileBySourceType(
+  sourceType: SourceType
+  ): Promise<{ filename: string; mimeType: string; data: Buffer } | null> {
+    const { rows } = await pool.query<{ title: string; mime_type: string | null; file_data: Buffer | null }>(
+      `SELECT title, mime_type, file_data FROM documents
+      WHERE source_type = $1 AND file_data IS NOT NULL
+      ORDER BY created_at DESC LIMIT 1`,
+      [sourceType]
+    );
+    const row = rows[0];
+    if (!row || !row.file_data || !row.mime_type) return null;
+    return { filename: row.title, mimeType: row.mime_type, data: row.file_data };
   },
 
   /**

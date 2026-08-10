@@ -2,7 +2,7 @@
   "name": "ai-assistant-monorepo",
   "private": true,
   "version": "0.1.0",
-  "workspaces": ["apps/backend", "apps/frontend", "apps/mcp-gmail-calendar", "apps/mcp-linkedin", "apps/mcp-web-search"],
+  "workspaces": ["apps/backend", "apps/frontend", "apps/mcp-gmail-calendar", "apps/mcp-linkedin", "apps/mcp-web-search", "apps/mcp-filesystem", "apps/desktop"],
   "scripts": {
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",

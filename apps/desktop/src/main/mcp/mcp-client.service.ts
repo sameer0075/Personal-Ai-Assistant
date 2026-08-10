@@ -1,0 +1,117 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { env } from "../config/env.js";
+
+export interface McpToolDescriptor {
+  name: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+}
+
+interface ConnectedServer {
+  id: string;
+  client: Client;
+}
+
+let webSearchServer: ConnectedServer | null = null;
+let filesystemServer: ConnectedServer | null = null;
+let toolOwner = new Map<string, Client>();
+
+function requireEnv() {
+  if (!env) throw new Error("Desktop app is misconfigured - check the .env file (GOOGLE_API_KEY missing?)");
+  return env;
+}
+
+async function connectServer(id: string, command: string, args: string[], extraEnv: Record<string, string> = {}): Promise<ConnectedServer> {
+  const client = new Client({ name: `personal-assistant-desktop-${id}`, version: "0.1.0" });
+  const transport = new StdioClientTransport({
+    command,
+    args,
+    env: { ...getDefaultEnvironment(), ...extraEnv },
+  });
+  await client.connect(transport);
+  console.log(`✅ [desktop] connected to MCP server: ${id}`);
+  return { id, client };
+}
+
+/** Called once at app startup. Web search is optional - only connects if TAVILY_API_KEY is set. */
+export async function initStaticServers(): Promise<void> {
+  const cfg = requireEnv();
+  if (cfg.TAVILY_API_KEY) {
+    webSearchServer = await connectServer(
+      "web-search",
+      cfg.MCP_WEB_SEARCH_SERVER_COMMAND,
+      cfg.MCP_WEB_SEARCH_SERVER_ARGS.split(" ").filter(Boolean),
+      { TAVILY_API_KEY: cfg.TAVILY_API_KEY }
+    );
+  }
+  await refreshToolOwnerMap();
+}
+
+/**
+ * Called whenever the user opens a (different) project folder. Tears down
+ * any previous filesystem server (it's scoped to the old root - can't just
+ * reuse it) and spawns a fresh one scoped to the new root.
+ */
+export async function setProjectRoot(projectRoot: string): Promise<void> {
+  const cfg = requireEnv();
+
+  if (filesystemServer) {
+    await filesystemServer.client.close();
+    filesystemServer = null;
+  }
+
+  filesystemServer = await connectServer(
+    "filesystem",
+    cfg.MCP_FILESYSTEM_SERVER_COMMAND,
+    cfg.MCP_FILESYSTEM_SERVER_ARGS.split(" ").filter(Boolean),
+    { PROJECT_ROOT: projectRoot }
+  );
+
+  await refreshToolOwnerMap();
+}
+
+async function refreshToolOwnerMap(): Promise<void> {
+  const map = new Map<string, Client>();
+  for (const server of [webSearchServer, filesystemServer]) {
+    if (!server) continue;
+    const { tools } = await server.client.listTools();
+    for (const t of tools) map.set(t.name, server.client);
+  }
+  toolOwner = map;
+}
+
+export async function listMcpTools(): Promise<McpToolDescriptor[]> {
+  const descriptors: McpToolDescriptor[] = [];
+  for (const server of [webSearchServer, filesystemServer]) {
+    if (!server) continue;
+    const { tools } = await server.client.listTools();
+    descriptors.push(...tools);
+  }
+  return descriptors;
+}
+
+export async function callMcpTool(name: string, args: Record<string, unknown>): Promise<string> {
+  const client = toolOwner.get(name);
+  if (!client) {
+    throw new Error(
+      filesystemServer
+        ? `No connected MCP server exposes a tool named "${name}"`
+        : `No connected MCP server exposes a tool named "${name}" - is a project open yet?`
+    );
+  }
+
+  const result = await client.callTool({ name, arguments: args });
+
+  const content = (result.content ?? []) as Array<{ type: string; text?: string }>;
+  const text = content
+    .filter((c) => c.type === "text" && typeof c.text === "string")
+    .map((c) => c.text)
+    .join("\n");
+
+  if (result.isError) {
+    throw new Error(text || `MCP tool "${name}" failed with no error message`);
+  }
+
+  return text;
+}
