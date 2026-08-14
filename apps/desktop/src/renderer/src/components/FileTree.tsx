@@ -29,11 +29,13 @@ interface DirectoryEntry {
 }
 
 interface FileTreeProps {
+  projectId: string;
   activePath: string | null;
   onFileClick: (path: string) => void;
 }
 
 interface FileTreeNodeProps {
+  projectId: string;
   path: string;
   name: string;
   type: "file" | "directory";
@@ -166,6 +168,7 @@ function getFileIcon(name: string) {
 }
 
 function FileTreeNode({
+  projectId,
   path,
   name,
   type,
@@ -188,7 +191,7 @@ function FileTreeNode({
       setIsLoading(true);
 
       try {
-        const result = await window.api.readDirectory(path);
+        const result = await window.api.readDirectory(projectId,path);
         setChildren(result);
       } finally {
         setIsLoading(false);
@@ -290,6 +293,7 @@ function FileTreeNode({
           {children.map((child) => (
             <FileTreeNode
               key={child.name}
+              projectId={projectId}
               path={`${path === "." ? "" : `${path}/`}${child.name}`}
               name={child.name}
               type={child.type}
@@ -305,6 +309,7 @@ function FileTreeNode({
 }
 
 export default function FileTree({
+  projectId,
   activePath,
   onFileClick,
 }: FileTreeProps) {
@@ -363,6 +368,7 @@ export default function FileTree({
 
         <FileTreeNode
           path="."
+          projectId={projectId}
           name="."
           type="directory"
           depth={0}

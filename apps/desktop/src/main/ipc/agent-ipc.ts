@@ -1,33 +1,44 @@
 import { ipcMain } from "electron";
-import { runCodingAgent, type CodingAgentAnswer, type EditorContext } from "../agent/coding-agent.graph.js";
+import {
+  runCodingAgentForProject,
+  getDisplayHistory,
+  resetConversationForProject,
+  type CodingAgentAnswer,
+  type AgentMessageContext,
+} from "../agent/coding-agent.graph.js";
 import { getMainWindow } from "../state/window-state.js";
-
-const FILE_MUTATING_TOOLS = new Set(["write_file", "edit_file", "delete_file", "create_directory"]);
+import { getProject } from "../state/project-state.js";
+import { FILE_MUTATING_TOOLS } from "../agent/mutating-tools.js";
 
 export function registerAgentIpc(): void {
   ipcMain.handle(
     "agent:send-message",
-    async (_event, message: string, editorContext?: EditorContext): Promise<CodingAgentAnswer> => {
-      const result = await runCodingAgent(message, editorContext);
-      notifyOfFileChanges(result);
+    async (_event, projectId: string, message: string, context?: AgentMessageContext): Promise<CodingAgentAnswer> => {
+      const result = await runCodingAgentForProject(projectId, message, context);
+      notifyOfFileChanges(projectId, result);
       return result;
     }
   );
+
+  ipcMain.handle("agent:get-history", (_event, projectId: string) => getDisplayHistory(projectId));
+
+  ipcMain.handle("agent:clear-history", async (_event, projectId: string): Promise<void> => {
+    await resetConversationForProject(projectId);
+  });
 }
 
-/**
- * The actual file writes happen inside the separate mcp-filesystem child
- * process, not here - so the main process learns what changed by inspecting
- * which tools the agent called, and tells the renderer to refresh any open
- * editor tab / the file tree for those paths.
- */
-function notifyOfFileChanges(result: CodingAgentAnswer): void {
+function notifyOfFileChanges(projectId: string, result: CodingAgentAnswer): void {
+  const win = getMainWindow();
+  if (!win) return;
+  const project = getProject(projectId);
+  if (!project) return;
+
   const changedPaths = result.toolCalls
-    .filter((call) => FILE_MUTATING_TOOLS.has(call.tool))
-    .map((call) => (call.input as { path?: string })?.path)
+    .filter((c) => FILE_MUTATING_TOOLS.has(c.tool))
+    .map((c) => (c.input as { path?: string })?.path)
     .filter((p): p is string => Boolean(p));
 
-  if (changedPaths.length === 0) return;
-
-  getMainWindow()?.webContents.send("fs:external-change", changedPaths);
+  if (changedPaths.length) {
+    win.webContents.send("fs:external-change", projectId, changedPaths);
+  }
 }

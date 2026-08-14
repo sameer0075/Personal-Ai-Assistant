@@ -14,15 +14,25 @@ interface ConnectedServer {
 }
 
 let webSearchServer: ConnectedServer | null = null;
-let filesystemServer: ConnectedServer | null = null;
-let toolOwner = new Map<string, Client>();
+
+// One filesystem MCP server per open project, keyed by projectId — this is
+// the core of multi-project isolation: each server process only ever knows
+// about its own PROJECT_ROOT, so a tool call for project A can never touch
+// project B's files even if the agent hallucinated the wrong path.
+const filesystemServers = new Map<string, ConnectedServer>();
+const toolOwnerByProject = new Map<string, Map<string, Client>>();
 
 function requireEnv() {
-  if (!env) throw new Error("Desktop app is misconfigured - check the .env file (GOOGLE_API_KEY missing?)");
+  if (!env) throw new Error("Desktop app is misconfigured - check the .env file (GOOGLE_API_KEY, etc).");
   return env;
 }
 
-async function connectServer(id: string, command: string, args: string[], extraEnv: Record<string, string> = {}): Promise<ConnectedServer> {
+async function connectServer(
+  id: string,
+  command: string,
+  args: string[],
+  extraEnv: Record<string, string>
+): Promise<ConnectedServer> {
   const client = new Client({ name: `personal-assistant-desktop-${id}`, version: "0.1.0" });
   const transport = new StdioClientTransport({
     command,
@@ -45,45 +55,50 @@ export async function initStaticServers(): Promise<void> {
       { TAVILY_API_KEY: cfg.TAVILY_API_KEY }
     );
   }
-  await refreshToolOwnerMap();
 }
 
-/**
- * Called whenever the user opens a (different) project folder. Tears down
- * any previous filesystem server (it's scoped to the old root - can't just
- * reuse it) and spawns a fresh one scoped to the new root.
- */
-export async function setProjectRoot(projectRoot: string): Promise<void> {
+/** Spawns a new filesystem MCP server scoped to `root`, registered under `projectId`. */
+export async function connectProjectFilesystem(projectId: string, root: string): Promise<void> {
   const cfg = requireEnv();
 
-  if (filesystemServer) {
-    await filesystemServer.client.close();
-    filesystemServer = null;
-  }
+  // If this project is already connected (re-open case), don't leak a duplicate process.
+  if (filesystemServers.has(projectId)) return;
 
-  filesystemServer = await connectServer(
-    "filesystem",
+  const server = await connectServer(
+    `filesystem-${projectId}`,
     cfg.MCP_FILESYSTEM_SERVER_COMMAND,
     cfg.MCP_FILESYSTEM_SERVER_ARGS.split(" ").filter(Boolean),
-    { PROJECT_ROOT: projectRoot }
+    { PROJECT_ROOT: root }
   );
-
-  await refreshToolOwnerMap();
+  filesystemServers.set(projectId, server);
+  await refreshToolOwnerMap(projectId);
 }
 
-async function refreshToolOwnerMap(): Promise<void> {
+/** Tears down a project's filesystem server when the project is closed. */
+export async function disconnectProjectFilesystem(projectId: string): Promise<void> {
+  const server = filesystemServers.get(projectId);
+  if (!server) return;
+  await server.client.close();
+  filesystemServers.delete(projectId);
+  toolOwnerByProject.delete(projectId);
+}
+
+async function refreshToolOwnerMap(projectId: string): Promise<void> {
   const map = new Map<string, Client>();
-  for (const server of [webSearchServer, filesystemServer]) {
+
+  const fsServer = filesystemServers.get(projectId);
+  for (const server of [webSearchServer, fsServer]) {
     if (!server) continue;
     const { tools } = await server.client.listTools();
     for (const t of tools) map.set(t.name, server.client);
   }
-  toolOwner = map;
+  toolOwnerByProject.set(projectId, map);
 }
 
-export async function listMcpTools(): Promise<McpToolDescriptor[]> {
+export async function listMcpToolsForProject(projectId: string): Promise<McpToolDescriptor[]> {
   const descriptors: McpToolDescriptor[] = [];
-  for (const server of [webSearchServer, filesystemServer]) {
+  const fsServer = filesystemServers.get(projectId);
+  for (const server of [webSearchServer, fsServer]) {
     if (!server) continue;
     const { tools } = await server.client.listTools();
     descriptors.push(...tools);
@@ -91,18 +106,20 @@ export async function listMcpTools(): Promise<McpToolDescriptor[]> {
   return descriptors;
 }
 
-export async function callMcpTool(name: string, args: Record<string, unknown>): Promise<string> {
-  const client = toolOwner.get(name);
+export async function callMcpToolForProject(
+  projectId: string,
+  name: string,
+  args: Record<string, unknown>
+): Promise<string> {
+  const owners = toolOwnerByProject.get(projectId);
+  const client = owners?.get(name);
   if (!client) {
     throw new Error(
-      filesystemServer
-        ? `No connected MCP server exposes a tool named "${name}"`
-        : `No connected MCP server exposes a tool named "${name}" - is a project open yet?`
+      `No connected MCP server exposes a tool named "${name}" for this project - is it open?`
     );
   }
 
   const result = await client.callTool({ name, arguments: args });
-
   const content = (result.content ?? []) as Array<{ type: string; text?: string }>;
   const text = content
     .filter((c) => c.type === "text" && typeof c.text === "string")
@@ -112,6 +129,5 @@ export async function callMcpTool(name: string, args: Record<string, unknown>): 
   if (result.isError) {
     throw new Error(text || `MCP tool "${name}" failed with no error message`);
   }
-
   return text;
 }

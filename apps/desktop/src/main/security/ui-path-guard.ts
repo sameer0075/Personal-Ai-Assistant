@@ -1,30 +1,28 @@
 import path from "node:path";
-import { getProjectRoot } from "../state/project-state.js";
+import { getProject } from "../state/project-state.js";
 
 /**
- * Deliberately the same logic as apps/mcp-filesystem's path-guard.ts, kept as
- * a separate implementation because it serves a different caller: this one
- * guards the UI's own direct file-tree/editor IPC handlers (a human clicking
- * around), not the AI agent's tool calls (which go through the MCP server's
- * own, independent copy of this same check). Two callers, two independently
- * enforced boundaries - the AI agent being compromised or buggy doesn't help
- * it escape via the UI's file access path, and vice versa.
+ * Same logic as apps/mcp-filesystem's path-guard.ts, kept as a separate
+ * implementation because it serves a different caller: this guards the UI's
+ * own direct file-tree/editor IPC handlers (a human clicking around), not
+ * the AI agent's tool calls. Now scoped per-project instead of a single
+ * global root, since multiple projects can be open at once.
  */
-export function resolveUiSafePath(relativePath: string): string {
-  const root = getProjectRoot();
-  if (!root) {
-    throw new Error("No project is open");
+export function resolveUiSafePath(projectId: string, relativePath: string): string {
+  const project = getProject(projectId);
+  if (!project) {
+    throw new Error(`Project "${projectId}" is not open`);
   }
 
   if (path.isAbsolute(relativePath)) {
     throw new Error(`Path "${relativePath}" is absolute - all paths must be relative to the project root.`);
   }
 
-  const resolved = path.resolve(root, relativePath);
-  const isInsideRoot = resolved === root || resolved.startsWith(root + path.sep);
+  const resolved = path.resolve(project.root, relativePath);
+  const isInsideRoot = resolved === project.root || resolved.startsWith(project.root + path.sep);
 
   if (!isInsideRoot) {
-    throw new Error(`Path "${relativePath}" resolves outside the open project.`);
+    throw new Error(`Path "${relativePath}" resolves outside project "${project.name}".`);
   }
 
   return resolved;

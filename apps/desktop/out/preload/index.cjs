@@ -2,24 +2,27 @@
 const electron = require("electron");
 const api = {
   openFolder: () => electron.ipcRenderer.invoke("project:open-folder"),
-  getProjectRoot: () => electron.ipcRenderer.invoke("project:get-root"),
-  readDirectory: (path) => electron.ipcRenderer.invoke("fs:read-directory", path),
-  readFile: (path) => electron.ipcRenderer.invoke("fs:read-file", path),
-  saveFile: (path, content) => electron.ipcRenderer.invoke("fs:save-file", path, content),
-  sendMessage: (message, editorContext) => electron.ipcRenderer.invoke("agent:send-message", message, editorContext),
+  listProjects: () => electron.ipcRenderer.invoke("project:list"),
+  getActiveProject: () => electron.ipcRenderer.invoke("project:get-active"),
+  switchProject: (projectId) => electron.ipcRenderer.invoke("project:switch", projectId),
+  closeProject: (projectId) => electron.ipcRenderer.invoke("project:close", projectId),
+  readDirectory: (projectId, path) => electron.ipcRenderer.invoke("fs:read-directory", projectId, path),
+  readFile: (projectId, path) => electron.ipcRenderer.invoke("fs:read-file", projectId, path),
+  saveFile: (projectId, path, content) => electron.ipcRenderer.invoke("fs:save-file", projectId, path, content),
+  getChatHistory: (projectId) => electron.ipcRenderer.invoke("agent:get-history", projectId),
+  clearChatHistory: (projectId) => electron.ipcRenderer.invoke("agent:clear-history", projectId),
+  sendMessage: (projectId, message, context) => electron.ipcRenderer.invoke("agent:send-message", projectId, message, context),
+  /** Fires with the projectId whose files changed, so the renderer only refreshes that project's UI. */
   onExternalFileChange: (callback) => {
-    const listener = (_event, paths) => callback(paths);
+    const listener = (_event, projectId, paths) => callback(projectId, paths);
     electron.ipcRenderer.on("fs:external-change", listener);
     return () => electron.ipcRenderer.removeListener("fs:external-change", listener);
   },
-  /** Fires when the agent wants to write/edit/delete a file and is waiting on your decision. */
-  onPendingChange: (callback) => {
-    const listener = (_event, change) => callback(change);
-    electron.ipcRenderer.on("agent:pending-change", listener);
-    return () => electron.ipcRenderer.removeListener("agent:pending-change", listener);
+  onToolConfirmationRequest: (callback) => {
+    const listener = (_event, request) => callback(request);
+    electron.ipcRenderer.on("agent:tool-confirmation-request", listener);
+    return () => electron.ipcRenderer.removeListener("agent:tool-confirmation-request", listener);
   },
-  respondToPendingChange: (id, approved) => {
-    electron.ipcRenderer.send("agent:respond-to-pending-change", id, approved);
-  }
+  respondToToolConfirmation: (requestId, approved) => electron.ipcRenderer.invoke("agent:confirm-tool", requestId, approved)
 };
 electron.contextBridge.exposeInMainWorld("api", api);

@@ -9,358 +9,241 @@ import FolderOpenRoundedIcon from "@mui/icons-material/FolderOpenRounded";
 import CodeRoundedIcon from "@mui/icons-material/CodeRounded";
 import FileTree from "./components/FileTree";
 import EditorPane, { type OpenTab } from "./components/EditorPane";
-import ChatPanel from "./components/ChatPanel";
+import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
+import ProjectSwitcher from "./components/ProjectSwitcher";
+
 import { tokens } from "./theme/theme";
-import ActivityBar from "./components/ActivityBar";
-import PendingChangeDialog, { type PendingFileChange } from "./components/PendingChangeDialog";
+
+interface ProjectInfo {
+  id: string;
+  root: string;
+  name: string;
+}
+
+// Per-project UI state, so switching the active project preserves exactly
+// what you had open — same expectation as VS Code/Cursor workspaces.
+interface ProjectUiState {
+  tabs: OpenTab[];
+  activePath: string | null;
+  treeVersion: number;
+  messages: ChatMessage[];
+}
+
+function emptyUiState(): ProjectUiState {
+  return { tabs: [], activePath: null, treeVersion: 0, messages: [] };
+}
 
 export default function App() {
-  const [projectRoot, setProjectRoot] = useState<string | null>(null);
-  const [tabs, setTabs] = useState<OpenTab[]>([]);
-  const [activePath, setActivePath] = useState<string | null>(null);
-  const [treeVersion, setTreeVersion] = useState(0); // bump to force the file tree to re-fetch
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [uiByProject, setUiByProject] = useState<Map<string, ProjectUiState>>(new Map());
   const [notice, setNotice] = useState<{ message: string; severity: "success" | "error" } | null>(null);
-  const [pendingChanges, setPendingChanges] = useState<PendingFileChange[]>([]);
 
-  // Pick up an already-open project if the window reloads mid-session (dev HMR, etc).
-  useEffect(() => {
-    window.api.getProjectRoot().then((root) => root && setProjectRoot(root));
-  }, []);
+  const activeUi = activeProjectId ? uiByProject.get(activeProjectId) ?? emptyUiState() : null;
 
-  useEffect(() => {
-    return window.api.onPendingChange((change) => {
-      setPendingChanges((prev) => [...prev, change]);
+  function updateUi(projectId: string, patch: Partial<ProjectUiState>) {
+    setUiByProject((prev) => {
+      const next = new Map(prev);
+      const current = next.get(projectId) ?? emptyUiState();
+      next.set(projectId, { ...current, ...patch });
+      return next;
     });
+  }
+
+  // Pick up already-open projects if the window reloads mid-session.
+  useEffect(() => {
+    (async () => {
+      const [list, active] = await Promise.all([window.api.listProjects(), window.api.getActiveProject()]);
+      setProjects(list);
+      setActiveProjectId(active);
+      setUiByProject(new Map(list.map((p) => [p.id, emptyUiState()])));
+    })();
   }, []);
 
-  function respondToPendingChange(approved: boolean) {
-    const [current, ...rest] = pendingChanges;
-    if (!current) return;
-    window.api.respondToPendingChange(current.id, approved);
-    setPendingChanges(rest);
+  async function handleOpenFolder() {
+    const project = await window.api.openFolder();
+    if (!project) return;
+
+    setProjects((prev) => (prev.some((p) => p.id === project.id) ? prev : [...prev, project]));
+    setUiByProject((prev) => (prev.has(project.id) ? prev : new Map(prev).set(project.id, emptyUiState())));
+    setActiveProjectId(project.id);
+  }
+
+  async function handleSwitchProject(projectId: string) {
+    await window.api.switchProject(projectId);
+    setActiveProjectId(projectId);
+  }
+
+  async function handleCloseProject(projectId: string) {
+    await window.api.closeProject(projectId);
+    setProjects((prev) => prev.filter((p) => p.id !== projectId));
+    setUiByProject((prev) => {
+      const next = new Map(prev);
+      next.delete(projectId);
+      return next;
+    });
+    if (activeProjectId === projectId) {
+      const remaining = projects.filter((p) => p.id !== projectId);
+      const nextActive = remaining.length ? remaining[remaining.length - 1].id : null;
+      setActiveProjectId(nextActive);
+      if (nextActive) await window.api.switchProject(nextActive);
+    }
   }
 
   const openFile = useCallback(
     async (path: string) => {
-      setActivePath(path);
-      if (tabs.some((t) => t.path === path)) return;
+      if (!activeProjectId || !activeUi) return;
+      updateUi(activeProjectId, { activePath: path });
+      if (activeUi.tabs.some((t) => t.path === path)) return;
 
       try {
-        const content = await window.api.readFile(path);
-        setTabs((prev) => [...prev, { path, content, isDirty: false }]);
+        const content = await window.api.readFile(activeProjectId, path);
+        updateUi(activeProjectId, { tabs: [...activeUi.tabs, { path, content, isDirty: false }] });
       } catch (err) {
         setNotice({ message: err instanceof Error ? err.message : "Failed to open file", severity: "error" });
       }
     },
-    [tabs]
+    [activeProjectId, activeUi]
   );
 
   function closeTab(path: string) {
-    setTabs((prev) => prev.filter((t) => t.path !== path));
-    if (activePath === path) {
-      const remaining = tabs.filter((t) => t.path !== path);
-      setActivePath(remaining.length ? remaining[remaining.length - 1].path : null);
-    }
+    if (!activeProjectId || !activeUi) return;
+    const tabs = activeUi.tabs.filter((t) => t.path !== path);
+    const activePath = activeUi.activePath === path ? (tabs.length ? tabs[tabs.length - 1].path : null) : activeUi.activePath;
+    updateUi(activeProjectId, { tabs, activePath });
   }
 
   function updateContent(path: string, content: string) {
-    setTabs((prev) => prev.map((t) => (t.path === path ? { ...t, content, isDirty: true } : t)));
+    if (!activeProjectId || !activeUi) return;
+    const tabs = activeUi.tabs.map((t) => (t.path === path ? { ...t, content, isDirty: true } : t));
+    updateUi(activeProjectId, { tabs });
   }
 
   const saveFile = useCallback(
     async (path: string) => {
-      const tab = tabs.find((t) => t.path === path);
+      if (!activeProjectId || !activeUi) return;
+      const tab = activeUi.tabs.find((t) => t.path === path);
       if (!tab) return;
       try {
-        await window.api.saveFile(path, tab.content);
-        setTabs((prev) => prev.map((t) => (t.path === path ? { ...t, isDirty: false } : t)));
+        await window.api.saveFile(activeProjectId, path, tab.content);
+        updateUi(activeProjectId, {
+          tabs: activeUi.tabs.map((t) => (t.path === path ? { ...t, isDirty: false } : t)),
+        });
       } catch (err) {
         setNotice({ message: err instanceof Error ? err.message : "Failed to save file", severity: "error" });
       }
     },
-    [tabs]
+    [activeProjectId, activeUi]
   );
 
-  // The agent edits files through a separate process (the filesystem MCP
-  // server) - this is how the editor finds out and stays in sync, rather than
-  // silently going stale.
-  useEffect(() => {
-    return window.api.onExternalFileChange(async (paths) => {
-      setTreeVersion((v) => v + 1);
+  const sendMessage = useCallback(
+    async (message: string) => {
+      if (!activeProjectId) return;
+      const userMsg: ChatMessage = { role: "user", content: message };
+      const current = uiByProject.get(activeProjectId) ?? emptyUiState();
+      updateUi(activeProjectId, { messages: [...current.messages, userMsg] });
 
+      const result = await window.api.sendMessage(activeProjectId, message);
+      const latest = uiByProject.get(activeProjectId) ?? current;
+      updateUi(activeProjectId, {
+        messages: [...latest.messages, userMsg, { role: "assistant", content: result.answer, toolCalls: result.toolCalls }],
+      });
+    },
+    [activeProjectId, uiByProject]
+  );
+
+  // The agent edits files through a separate process (a project-scoped MCP
+  // server) — route the refresh only to the project that actually changed.
+  useEffect(() => {
+    return window.api.onExternalFileChange(async (projectId, paths) => {
+      const ui = uiByProject.get(projectId);
+      if (!ui) return;
+
+      let tabs = ui.tabs;
       for (const path of paths) {
         if (!tabs.some((t) => t.path === path)) continue;
         try {
-          const content = await window.api.readFile(path);
-          setTabs((prev) => prev.map((t) => (t.path === path ? { ...t, content, isDirty: false } : t)));
+          const content = await window.api.readFile(projectId, path);
+          tabs = tabs.map((t) => (t.path === path ? { ...t, content, isDirty: false } : t));
         } catch {
-          // file may have been deleted by the agent - just leave the tab showing its last content
+          // file may have been deleted by the agent - leave the tab as-is.
         }
       }
+      updateUi(projectId, { tabs, treeVersion: ui.treeVersion + 1 });
     });
-  }, [tabs]);
+  }, [uiByProject]);
 
-  async function handleOpenFolder() {
-    const root = await window.api.openFolder();
-    if (!root) return;
-    setProjectRoot(root);
-    setTabs([]);
-    setActivePath(null);
-    setTreeVersion((v) => v + 1);
-  }
-
-if (!projectRoot) {
-  return (
-    <Box
-      sx={{
-        height: "100vh",
-        bgcolor: tokens.editor,
-
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <Stack
-        sx={{
-          width: 420,
-          alignItems: "center",
-          textAlign: "center",
-        }}
-      >
-        <CodeRoundedIcon
-          sx={{
-            fontSize: 52,
-            color: tokens.mutedDim,
-            mb: 2,
-          }}
-        />
-
-        <Typography
-          sx={{
-            fontSize: 22,
-            fontWeight: 300,
-            color: tokens.textBright,
-            mb: 1,
-          }}
-        >
-          Welcome to your AI Code Editor
-        </Typography>
-
-        <Typography
-          sx={{
-            fontSize: 13,
-            color: tokens.muted,
-            lineHeight: 1.6,
-            mb: 3,
-          }}
-        >
-          Open a project to start editing,
-          exploring your code, and working
-          with the coding agent.
-        </Typography>
-
+  if (!activeProjectId || !activeUi) {
+    return (
+      <Box sx={{ height: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, bgcolor: tokens.bg }}>
+        <CodeRoundedIcon sx={{ fontSize: 40, color: tokens.accentBright }} />
+        <Typography sx={{ fontSize: 15, color: tokens.text }}>No project open</Typography>
         <Button
           variant="contained"
           startIcon={<FolderOpenRoundedIcon />}
           onClick={handleOpenFolder}
-          sx={{
-            bgcolor: tokens.accent,
-            color: "#fff",
-
-            px: 2,
-
-            "&:hover": {
-              bgcolor: tokens.accentBright,
-            },
-          }}
+          sx={{ bgcolor: tokens.accent, color: "#04211d", "&:hover": { bgcolor: tokens.accentBright } }}
         >
           Open Folder
         </Button>
-      </Stack>
-    </Box>
-  );
-}
-return (
-  <Box
-    sx={{
-      height: "100vh",
-      width: "100vw",
+      </Box>
+    );
+  }
 
-      display: "flex",
-      flexDirection: "column",
-
-      overflow: "hidden",
-
-      bgcolor: tokens.bg,
-      color: tokens.text,
-    }}
-  >
-    {/* Main IDE */}
-    <Box
-      sx={{
-        flex: 1,
-        minHeight: 0,
-
-        display: "flex",
-      }}
-    >
-      {/* Activity Bar */}
-      <ActivityBar
-        onOpenFolder={handleOpenFolder}
+  return (
+    <Box sx={{ height: "100vh", display: "flex", bgcolor: tokens.bg }}>
+      <ProjectSwitcher
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onSwitch={handleSwitchProject}
+        onClose={handleCloseProject}
+        onAddFolder={handleOpenFolder}
       />
 
-      {/* Explorer */}
-      <Box
-        sx={{
-          width: 245,
-          flexShrink: 0,
-          minHeight: 0,
+      <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <Stack direction="row" sx={{ alignItems: "center", gap: 1, px: 2, py: 1, borderBottom: `1px solid ${tokens.border}` }}>
+          <CodeRoundedIcon sx={{ fontSize: 16, color: tokens.accentBright }} />
+          <Typography sx={{ fontSize: 12.5, color: tokens.muted, fontFamily: "monospace" }}>
+            {projects.find((p) => p.id === activeProjectId)?.root}
+          </Typography>
+        </Stack>
 
-          borderRight:
-            `1px solid ${tokens.border}`,
+        <Box sx={{ flex: 1, display: "flex", minHeight: 0 }}>
+          <Box sx={{ width: 240, flexShrink: 0, borderRight: `1px solid ${tokens.border}` }}>
+            <FileTree
+              key={`${activeProjectId}-${activeUi.treeVersion}`}
+              projectId={activeProjectId}
+              activePath={activeUi.activePath}
+              onFileClick={openFile}
+            />
+          </Box>
 
-          overflowY: "auto",
-        }}
-      >
-        <FileTree
-          key={treeVersion}
-          activePath={activePath}
-          onFileClick={openFile}
-        />
+          <EditorPane
+            tabs={activeUi.tabs}
+            activePath={activeUi.activePath}
+            onSelectTab={(path) => updateUi(activeProjectId, { activePath: path })}
+            onCloseTab={closeTab}
+            onContentChange={updateContent}
+            onSave={saveFile}
+          />
+
+          <ChatPanel
+            key={activeProjectId}
+            projectId={activeProjectId}
+            projectOpen={Boolean(activeProjectId)}
+            activePath={activeUi.activePath}
+            openPaths={activeUi.tabs.map((t) => t.path)}
+          />
+        </Box>
       </Box>
 
-      {/* Editor */}
-      <EditorPane
-        tabs={tabs}
-        activePath={activePath}
-        onSelectTab={setActivePath}
-        onCloseTab={closeTab}
-        onContentChange={updateContent}
-        onSave={saveFile}
-      />
-
-      {/* AI */}
-      <ChatPanel
-        projectOpen={Boolean(projectRoot)}
-        activePath={activePath}
-        openPaths={tabs.map((t) => t.path)}
-      />
+      <Snackbar open={notice !== null} autoHideDuration={4000} onClose={() => setNotice(null)} anchorOrigin={{ vertical: "bottom", horizontal: "center" }}>
+        {notice ? (
+          <Alert severity={notice.severity} variant="filled" onClose={() => setNotice(null)}>
+            {notice.message}
+          </Alert>
+        ) : undefined}
+      </Snackbar>
     </Box>
-
-    {/* Status Bar */}
-    <Box
-      sx={{
-        height: 22,
-        flexShrink: 0,
-
-        display: "flex",
-        alignItems: "center",
-
-        px: 1,
-
-        bgcolor: "#007acc",
-        color: "#fff",
-
-        fontSize: 11,
-      }}
-    >
-      <Stack
-        direction="row"
-        spacing={1.5}
-        sx={{
-          alignItems: "center",
-        }}
-      >
-        <Typography
-          sx={{
-            fontSize: 11,
-            color: "#fff",
-          }}
-        >
-          main
-        </Typography>
-
-        <Typography
-          sx={{
-            fontSize: 11,
-            color: "#fff",
-          }}
-        >
-          ✓ 0
-        </Typography>
-      </Stack>
-
-      <Box sx={{ flex: 1 }} />
-
-      <Stack
-        direction="row"
-        spacing={1.5}
-      >
-        <Typography
-          sx={{
-            fontSize: 11,
-            color: "#fff",
-          }}
-        >
-          TypeScript
-        </Typography>
-
-        <Typography
-          sx={{
-            fontSize: 11,
-            color: "#fff",
-          }}
-        >
-          UTF-8
-        </Typography>
-
-        <Typography
-          sx={{
-            fontSize: 11,
-            color: "#fff",
-          }}
-        >
-          LF
-        </Typography>
-
-        <Typography
-          sx={{
-            fontSize: 11,
-            color: "#fff",
-          }}
-        >
-          Spaces: 2
-        </Typography>
-      </Stack>
-    </Box>
-
-    <Snackbar
-      open={notice !== null}
-      autoHideDuration={4000}
-      onClose={() => setNotice(null)}
-      anchorOrigin={{
-        vertical: "bottom",
-        horizontal: "center",
-      }}
-    >
-      {notice ? (
-        <Alert
-          severity={notice.severity}
-          variant="filled"
-          onClose={() => setNotice(null)}
-        >
-          {notice.message}
-        </Alert>
-      ) : undefined}
-    </Snackbar>
-    {pendingChanges[0] && (
-        <PendingChangeDialog
-          change={pendingChanges[0]}
-          queuedCount={pendingChanges.length - 1}
-          onRespond={respondToPendingChange}
-        />
-    )}
-  </Box>
-);
+  );
 }

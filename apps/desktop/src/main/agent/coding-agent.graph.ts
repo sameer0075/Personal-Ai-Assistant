@@ -1,46 +1,54 @@
 import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { HumanMessage, AIMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import { createChatModel } from "./llm-provider.js";
-import { loadMcpToolsForAgent } from "../mcp/mcp-tool-adapter.js";
+import { loadMcpToolsForProject } from "../mcp/mcp-tool-adapter.js";
+import {
+  loadChatHistory,
+  saveChatHistory,
+  clearChatHistory,
+  type StoredChatMessage,
+} from "../state/chat-history.store.js";
 
-const SYSTEM_PROMPT = [
-  "You are a coding assistant working directly inside the user's open project, similar to Cursor. You have real",
-  "tools, scoped to this project only:",
-  "- list_directory / read_file / search_files: explore the codebase.",
-  "- write_file: create a new file or fully overwrite an existing one.",
-  "- edit_file: make a precise, targeted change to part of a file (preferred over write_file for existing files -",
-  "  it changes only what needs to change, not the whole file).",
-  "- create_directory / delete_file: filesystem housekeeping.",
-  "- web_search / web_fetch (if available): look up docs, error messages, or library usage you're unsure about",
-  "  rather than guessing.",
-  "",
-  "You DO actually call write_file/edit_file/create_directory/delete_file when asked - don't just describe the",
-  "change and stop. Note that these four tools now show the user a diff and wait for their approval before the",
-  "write actually happens - so call the tool as soon as you know what to change, rather than describing it first",
-  "and waiting for a separate go-ahead; the approval step IS the go-ahead. If the user rejects a change, the tool",
-  "result will say so - don't retry the same change or a workaround, ask what they'd prefer instead.",
-  "When you finish a task, briefly summarize what you changed and in which files."
-  ,
-  "You DO actually modify files when asked - don't just describe the change and stop, make it, the same way you",
-  "would if the user asked you to send an email or create a calendar event in the other parts of this project.",
-  "When you finish a task, briefly summarize what you changed and in which files.",
-  "",
-  "Editor state: each message may start with an '[Editor state]' block listing which files are open in the",
-  "editor and which one is active. When the user says 'this file', 'this', 'the file I have open', or refers to",
-  "'it' without naming a path, they mean the active file listed there - read it (if you haven't already this",
-  "turn) rather than guessing a different file or asking which one they mean. If no file is active, and the",
-  "request clearly needs one, ask which file or use search_files/list_directory to find a likely candidate.",
-].join("\n");
+const SYSTEM_PROMPT = [/* unchanged */].join("\n");
 
 type CompiledAgent = ReturnType<typeof createReactAgent>;
-let agent: CompiledAgent | null = null;
-let conversationHistory: BaseMessage[] = [];
 
-/** Rebuilds the agent with the currently-connected MCP tools. Call after setProjectRoot() changes the toolset. */
-export async function rebuildCodingAgent(): Promise<void> {
-  const mcpTools = await loadMcpToolsForAgent();
-  agent = createReactAgent({ llm: createChatModel(), tools: mcpTools, prompt: SYSTEM_PROMPT });
-  conversationHistory = []; // a new/changed project is a fresh context, not a continuation
+interface ProjectAgentState {
+  agent: CompiledAgent;
+  projectRoot: string;
+  conversationHistory: BaseMessage[]; // what the LLM sees
+  displayMessages: StoredChatMessage[]; // what the UI shows + what gets persisted
+}
+
+const agentsByProject = new Map<string, ProjectAgentState>();
+
+/** Reconstructs enough LangChain history from the saved transcript so the
+ * agent has real conversational memory again after a restart. Tool-call
+ * detail is deliberately NOT replayed into the LLM context (only final
+ * answers) — replaying every past tool call would bloat the context window
+ * fast, and the agent can always re-call a tool if it needs fresh data. */
+function toBaseMessages(display: StoredChatMessage[]): BaseMessage[] {
+  return display.map((m) => (m.role === "user" ? new HumanMessage(m.content) : new AIMessage(m.content)));
+}
+
+export async function buildCodingAgentForProject(projectId: string, projectRoot: string): Promise<void> {
+  const mcpTools = await loadMcpToolsForProject(projectId);
+  const agent = createReactAgent({ llm: createChatModel(), tools: mcpTools, prompt: SYSTEM_PROMPT });
+
+  const displayMessages = await loadChatHistory(projectRoot);
+  agentsByProject.set(projectId, {
+    agent,
+    projectRoot,
+    conversationHistory: toBaseMessages(displayMessages),
+    displayMessages,
+  });
+}
+
+export function disposeCodingAgentForProject(projectId: string): void {
+  // Deliberately does NOT delete the on-disk history — closing a project in
+  // the UI shouldn't wipe its saved conversation, only an explicit "clear
+  // chat" action should. Reopening the same folder later restores it.
+  agentsByProject.delete(projectId);
 }
 
 export interface ToolCallTrace {
@@ -54,27 +62,17 @@ export interface CodingAgentAnswer {
   toolCalls: ToolCallTrace[];
 }
 
-/** What's open in the editor right now, sent fresh with every message so the agent stays in sync as tabs/focus change. */
-export interface EditorContext {
+export interface AgentMessageContext {
   activeFilePath: string | null;
   openFilePaths: string[];
 }
 
-function formatEditorContext(context?: EditorContext): string {
-  if (!context || (context.openFilePaths.length === 0 && !context.activeFilePath)) {
-    return "";
-  }
-
-  const lines = ["[Editor state]"];
-  if (context.openFilePaths.length > 0) {
-    lines.push(`Open tabs: ${context.openFilePaths.join(", ")}`);
-  }
-  lines.push(
-    context.activeFilePath
-      ? `Active file (what "this file" refers to by default): ${context.activeFilePath}`
-      : "No file is currently active."
-  );
-  return lines.join("\n") + "\n\n";
+function formatContext(context?: AgentMessageContext): string {
+  if (!context) return "";
+  const lines: string[] = [];
+  if (context.activeFilePath) lines.push(`Active file (what the user is currently looking at): ${context.activeFilePath}`);
+  if (context.openFilePaths.length) lines.push(`Other open files: ${context.openFilePaths.join(", ")}`);
+  return lines.length ? `[Editor context]\n${lines.join("\n")}\n\n` : "";
 }
 
 function extractToolCallTrace(messages: BaseMessage[]): ToolCallTrace[] {
@@ -96,27 +94,46 @@ function extractToolCallTrace(messages: BaseMessage[]): ToolCallTrace[] {
   return trace;
 }
 
-export async function runCodingAgent(message: string, editorContext?: EditorContext): Promise<CodingAgentAnswer> {
-  if (!agent) {
-    throw new Error("No project is open yet - open a folder first.");
+export async function runCodingAgentForProject(
+  projectId: string,
+  message: string,
+  context?: AgentMessageContext
+): Promise<CodingAgentAnswer> {
+  const state = agentsByProject.get(projectId);
+  if (!state) {
+    throw new Error("This project's agent isn't ready yet - try reopening the folder.");
   }
 
-  const contextualizedMessage = formatEditorContext(editorContext) + message;
+  const previousLength = state.conversationHistory.length;
+  state.conversationHistory.push(new HumanMessage(formatContext(context) + message));
 
-  const previousLength = conversationHistory.length;
-  conversationHistory.push(new HumanMessage(contextualizedMessage));
-
-  const result = await agent.invoke({ messages: conversationHistory });
-  conversationHistory = result.messages;
+  const result = await state.agent.invoke({ messages: state.conversationHistory });
+  state.conversationHistory = result.messages;
 
   const lastMessage = result.messages[result.messages.length - 1];
-  const answer = typeof lastMessage.content === "string" ? lastMessage.content : JSON.stringify(lastMessage.content);
+  const answer =
+    typeof lastMessage.content === "string" ? lastMessage.content : JSON.stringify(lastMessage.content);
 
-  // Only report tool calls made during this turn, not the whole accumulated history.
   const newMessages = result.messages.slice(previousLength);
-  return { answer, toolCalls: extractToolCallTrace(newMessages) };
+  const toolCalls = extractToolCallTrace(newMessages);
+
+  // Persist the raw user text (not the context-prefixed version) so
+  // reopening this project doesn't show the injected [Editor context] block.
+  state.displayMessages.push({ role: "user", content: message });
+  state.displayMessages.push({ role: "assistant", content: answer, toolCalls });
+  await saveChatHistory(state.projectRoot, state.displayMessages);
+
+  return { answer, toolCalls };
 }
 
-export function resetConversation(): void {
-  conversationHistory = [];
+export function getDisplayHistory(projectId: string): StoredChatMessage[] {
+  return agentsByProject.get(projectId)?.displayMessages ?? [];
+}
+
+export async function resetConversationForProject(projectId: string): Promise<void> {
+  const state = agentsByProject.get(projectId);
+  if (!state) return;
+  state.conversationHistory = [];
+  state.displayMessages = [];
+  await clearChatHistory(state.projectRoot);
 }

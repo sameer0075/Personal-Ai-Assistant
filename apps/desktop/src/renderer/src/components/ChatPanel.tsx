@@ -22,7 +22,20 @@ interface ToolCallTrace {
   output?: string;
 }
 
+interface PendingConfirmation {
+  requestId: string;
+  tool: string;
+  input: unknown;
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  toolCalls?: { tool: string; input: unknown; output?: string }[];
+}
+
 interface ChatPanelProps {
+  projectId: string;
   projectOpen: boolean;
   /** Path of the file currently active in the editor, relative to the project root - or null if none. */
   activePath: string | null;
@@ -37,11 +50,19 @@ interface Message {
   isError?: boolean;
 }
 
-export default function ChatPanel({ projectOpen, activePath, openPaths }: ChatPanelProps) {
+export default function ChatPanel({ projectId, projectOpen, activePath, openPaths }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [question, setQuestion] = useState("");
   const [isAsking, setIsAsking] = useState(false);
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
+
+  useEffect(() => {
+  return window.api.onToolConfirmationRequest((request) => {
+    if (request.projectId !== projectId) return;
+    setPendingConfirmation({ requestId: request.requestId, tool: request.tool, input: request.input });
+  });
+}, [projectId]);
 
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -57,7 +78,10 @@ export default function ChatPanel({ projectOpen, activePath, openPaths }: ChatPa
     setIsAsking(true);
 
     try {
-      const result = await window.api.sendMessage(trimmed, { activeFilePath: activePath, openFilePaths: openPaths });
+      const result = await window.api.sendMessage(projectId, trimmed, {
+        activeFilePath: activePath,
+        openFilePaths: openPaths,
+      });
       setMessages((prev) => [...prev, { role: "assistant", content: result.answer, toolCalls: result.toolCalls }]);
     } catch (err) {
       setMessages((prev) => [
@@ -68,6 +92,25 @@ export default function ChatPanel({ projectOpen, activePath, openPaths }: ChatPa
       setIsAsking(false);
     }
   }
+
+  async function respondToConfirmation(approved: boolean) {
+    if (!pendingConfirmation) return;
+    await window.api.respondToToolConfirmation(pendingConfirmation.requestId, approved);
+    setPendingConfirmation(null);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const history = await window.api.getChatHistory(projectId);
+      if (!cancelled) setMessages(history);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
 return (
   <Box
@@ -114,6 +157,25 @@ return (
       </Typography>
 
       <Box sx={{ flex: 1 }} />
+
+      <Chip
+        size="small"
+        label="Clear"
+        onClick={async () => {
+          await window.api.clearChatHistory(projectId);
+          setMessages([]);
+        }}
+        sx={{
+          height: 20,
+          fontSize: 10,
+          mr: 0.75,
+          cursor: "pointer",
+          bgcolor: "transparent",
+          color: tokens.muted,
+          border: `1px solid ${tokens.border}`,
+          "&:hover": { color: tokens.danger, borderColor: tokens.danger },
+        }}
+      />
 
       <Chip
         size="small"
@@ -252,6 +314,46 @@ return (
 
       <div ref={scrollAnchorRef} />
     </Box>
+
+    {pendingConfirmation && (
+      <Box sx={{ px: 1.5, py: 1.25, borderTop: `1px solid ${tokens.border}`, bgcolor: tokens.panelRaised }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 0.75 }}>
+          <BuildRoundedIcon sx={{ fontSize: 14, color: tokens.accentBright }} />
+          <Typography sx={{ fontSize: 12, color: tokens.text }}>
+            Agent wants to run <b>{pendingConfirmation.tool}</b>
+          </Typography>
+        </Stack>
+
+        <Typography
+          sx={{
+            fontSize: 11,
+            fontFamily: "monospace",
+            color: tokens.muted,
+            whiteSpace: "pre-wrap",
+            mb: 1,
+            maxHeight: 120,
+            overflowY: "auto",
+          }}
+        >
+          {JSON.stringify(pendingConfirmation.input, null, 2)}
+        </Typography>
+
+        <Stack direction="row" spacing={1}>
+          <Chip
+            size="small"
+            label="Approve"
+            onClick={() => respondToConfirmation(true)}
+            sx={{ cursor: "pointer", bgcolor: tokens.accent, color: "#fff", "&:hover": { bgcolor: tokens.accentBright } }}
+          />
+          <Chip
+            size="small"
+            label="Reject"
+            onClick={() => respondToConfirmation(false)}
+            sx={{ cursor: "pointer", bgcolor: "transparent", color: tokens.danger, border: `1px solid ${tokens.danger}` }}
+          />
+        </Stack>
+      </Box>
+    )}
 
     {/* Input */}
     <Box

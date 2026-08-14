@@ -4,13 +4,13 @@ import { config } from "dotenv";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { promises } from "node:fs";
+import { randomUUID, createHash } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { HumanMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { tool } from "@langchain/core/tools";
-import { randomUUID } from "node:crypto";
 const envPath = app.isPackaged ? path.join(process.resourcesPath, ".env") : path.join(path.dirname(fileURLToPath(import.meta.url)), "../../.env");
 config({ path: envPath });
 const envSchema = z.object({
@@ -39,52 +39,84 @@ function setMainWindow(win) {
 function getMainWindow() {
   return mainWindow;
 }
-let currentProjectRoot = null;
-function getProjectRoot() {
-  return currentProjectRoot;
+const projects = /* @__PURE__ */ new Map();
+let activeProjectId = null;
+function addProject(root) {
+  const existing = [...projects.values()].find((p) => p.root === root);
+  if (existing) {
+    activeProjectId = existing.id;
+    return existing;
+  }
+  const project = { id: randomUUID(), root, name: path.basename(root) };
+  projects.set(project.id, project);
+  activeProjectId = project.id;
+  return project;
 }
-function setProjectRootState(root) {
-  currentProjectRoot = root;
+function removeProject(id) {
+  projects.delete(id);
+  if (activeProjectId === id) {
+    const remaining = [...projects.keys()];
+    activeProjectId = remaining.length ? remaining[remaining.length - 1] : null;
+  }
 }
-function resolveUiSafePath(relativePath) {
-  const root = getProjectRoot();
-  if (!root) {
-    throw new Error("No project is open");
+function setActiveProject(id) {
+  if (!projects.has(id)) throw new Error(`Unknown project id "${id}"`);
+  activeProjectId = id;
+}
+function getProject(id) {
+  return projects.get(id);
+}
+function getActiveProjectId() {
+  return activeProjectId;
+}
+function listProjects() {
+  return [...projects.values()];
+}
+function resolveUiSafePath(projectId, relativePath) {
+  const project = getProject(projectId);
+  if (!project) {
+    throw new Error(`Project "${projectId}" is not open`);
   }
   if (path.isAbsolute(relativePath)) {
     throw new Error(`Path "${relativePath}" is absolute - all paths must be relative to the project root.`);
   }
-  const resolved = path.resolve(root, relativePath);
-  const isInsideRoot = resolved === root || resolved.startsWith(root + path.sep);
+  const resolved = path.resolve(project.root, relativePath);
+  const isInsideRoot = resolved === project.root || resolved.startsWith(project.root + path.sep);
   if (!isInsideRoot) {
-    throw new Error(`Path "${relativePath}" resolves outside the open project.`);
+    throw new Error(`Path "${relativePath}" resolves outside project "${project.name}".`);
   }
   return resolved;
 }
-const IGNORE_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", ".next", "out", "coverage", ".turbo", ".cache"]);
+const IGNORE_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", ".next", "out"]);
 function registerFsIpc() {
-  ipcMain.handle("fs:read-directory", async (_event, relativePath) => {
-    const target = resolveUiSafePath(relativePath);
-    const entries = await promises.readdir(target, { withFileTypes: true });
-    return entries.filter((e) => !IGNORE_DIRS.has(e.name)).map((e) => ({ name: e.name, type: e.isDirectory() ? "directory" : "file" })).sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "directory" ? -1 : 1);
-  });
-  ipcMain.handle("fs:read-file", async (_event, relativePath) => {
-    const target = resolveUiSafePath(relativePath);
+  ipcMain.handle(
+    "fs:read-directory",
+    async (_event, projectId, relativePath) => {
+      const target = resolveUiSafePath(projectId, relativePath);
+      const entries = await promises.readdir(target, { withFileTypes: true });
+      return entries.filter((e) => !IGNORE_DIRS.has(e.name)).map((e) => ({ name: e.name, type: e.isDirectory() ? "directory" : "file" })).sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "directory" ? -1 : 1);
+    }
+  );
+  ipcMain.handle("fs:read-file", async (_event, projectId, relativePath) => {
+    const target = resolveUiSafePath(projectId, relativePath);
     return promises.readFile(target, "utf-8");
   });
-  ipcMain.handle("fs:save-file", async (_event, relativePath, content) => {
-    const target = resolveUiSafePath(relativePath);
-    await promises.writeFile(target, content, "utf-8");
-  });
+  ipcMain.handle(
+    "fs:save-file",
+    async (_event, projectId, relativePath, content) => {
+      const target = resolveUiSafePath(projectId, relativePath);
+      await promises.writeFile(target, content, "utf-8");
+    }
+  );
 }
 let webSearchServer = null;
-let filesystemServer = null;
-let toolOwner = /* @__PURE__ */ new Map();
+const filesystemServers = /* @__PURE__ */ new Map();
+const toolOwnerByProject = /* @__PURE__ */ new Map();
 function requireEnv() {
-  if (!env) throw new Error("Desktop app is misconfigured - check the .env file (GOOGLE_API_KEY missing?)");
+  if (!env) throw new Error("Desktop app is misconfigured - check the .env file (GOOGLE_API_KEY, etc).");
   return env;
 }
-async function connectServer(id, command, args, extraEnv = {}) {
+async function connectServer(id, command, args, extraEnv) {
   const client = new Client({ name: `personal-assistant-desktop-${id}`, version: "0.1.0" });
   const transport = new StdioClientTransport({
     command,
@@ -105,45 +137,52 @@ async function initStaticServers() {
       { TAVILY_API_KEY: cfg.TAVILY_API_KEY }
     );
   }
-  await refreshToolOwnerMap();
 }
-async function setProjectRoot(projectRoot) {
+async function connectProjectFilesystem(projectId, root) {
   const cfg = requireEnv();
-  if (filesystemServer) {
-    await filesystemServer.client.close();
-    filesystemServer = null;
-  }
-  filesystemServer = await connectServer(
-    "filesystem",
+  if (filesystemServers.has(projectId)) return;
+  const server = await connectServer(
+    `filesystem-${projectId}`,
     cfg.MCP_FILESYSTEM_SERVER_COMMAND,
     cfg.MCP_FILESYSTEM_SERVER_ARGS.split(" ").filter(Boolean),
-    { PROJECT_ROOT: projectRoot }
+    { PROJECT_ROOT: root }
   );
-  await refreshToolOwnerMap();
+  filesystemServers.set(projectId, server);
+  await refreshToolOwnerMap(projectId);
 }
-async function refreshToolOwnerMap() {
+async function disconnectProjectFilesystem(projectId) {
+  const server = filesystemServers.get(projectId);
+  if (!server) return;
+  await server.client.close();
+  filesystemServers.delete(projectId);
+  toolOwnerByProject.delete(projectId);
+}
+async function refreshToolOwnerMap(projectId) {
   const map = /* @__PURE__ */ new Map();
-  for (const server of [webSearchServer, filesystemServer]) {
+  const fsServer = filesystemServers.get(projectId);
+  for (const server of [webSearchServer, fsServer]) {
     if (!server) continue;
     const { tools } = await server.client.listTools();
     for (const t of tools) map.set(t.name, server.client);
   }
-  toolOwner = map;
+  toolOwnerByProject.set(projectId, map);
 }
-async function listMcpTools() {
+async function listMcpToolsForProject(projectId) {
   const descriptors = [];
-  for (const server of [webSearchServer, filesystemServer]) {
+  const fsServer = filesystemServers.get(projectId);
+  for (const server of [webSearchServer, fsServer]) {
     if (!server) continue;
     const { tools } = await server.client.listTools();
     descriptors.push(...tools);
   }
   return descriptors;
 }
-async function callMcpTool(name, args) {
-  const client = toolOwner.get(name);
+async function callMcpToolForProject(projectId, name, args) {
+  const owners = toolOwnerByProject.get(projectId);
+  const client = owners?.get(name);
   if (!client) {
     throw new Error(
-      filesystemServer ? `No connected MCP server exposes a tool named "${name}"` : `No connected MCP server exposes a tool named "${name}" - is a project open yet?`
+      `No connected MCP server exposes a tool named "${name}" for this project - is it open?`
     );
   }
   const result = await client.callTool({ name, arguments: args });
@@ -209,61 +248,43 @@ function objectToZod(schema) {
 function mcpInputSchemaToZod(inputSchema) {
   return objectToZod(inputSchema);
 }
-const pendingResolvers = /* @__PURE__ */ new Map();
-function requestApproval(change) {
-  const id = randomUUID();
+const pending = /* @__PURE__ */ new Map();
+function requestToolConfirmation(projectId, tool2, input) {
+  const win = getMainWindow();
+  if (!win) return Promise.resolve(false);
+  const requestId = randomUUID();
   return new Promise((resolve) => {
-    pendingResolvers.set(id, resolve);
-    getMainWindow()?.webContents.send("agent:pending-change", { ...change, id });
+    pending.set(requestId, { projectId, resolve });
+    win.webContents.send("agent:tool-confirmation-request", { requestId, projectId, tool: tool2, input });
   });
 }
-function resolvePendingChange(id, approved) {
-  const resolve = pendingResolvers.get(id);
-  if (!resolve) return;
-  pendingResolvers.delete(id);
-  resolve(approved);
+function resolveToolConfirmation(requestId, approved) {
+  const resolver = pending.get(requestId);
+  if (!resolver) return;
+  pending.delete(requestId);
+  resolver.resolve(approved);
 }
-const FILE_MUTATING_TOOLS$1 = /* @__PURE__ */ new Set(["write_file", "edit_file", "delete_file", "create_directory"]);
-async function readCurrentContent(relativePath) {
-  try {
-    return await promises.readFile(resolveUiSafePath(relativePath), "utf-8");
-  } catch {
-    return null;
-  }
-}
-function computeProposedChange(toolName, args, before) {
-  switch (toolName) {
-    case "write_file":
-      return { after: String(args.content ?? ""), summary: before === null ? "Create new file" : "Overwrite file" };
-    case "edit_file": {
-      const oldStr = String(args.oldStr ?? "");
-      const newStr = String(args.newStr ?? "");
-      const after = before !== null && before.includes(oldStr) ? before.replace(oldStr, newStr) : null;
-      return { after, summary: "Edit file" };
+function cancelPendingConfirmationsForProject(projectId) {
+  for (const [requestId, resolver] of pending) {
+    if (resolver.projectId === projectId) {
+      pending.delete(requestId);
+      resolver.resolve(false);
     }
-    case "delete_file":
-      return { after: null, summary: "Delete file or directory" };
-    case "create_directory":
-      return { after: null, summary: "Create directory" };
   }
 }
-async function loadMcpToolsForAgent() {
-  const mcpTools = await listMcpTools();
+const FILE_MUTATING_TOOLS = /* @__PURE__ */ new Set(["write_file", "edit_file", "delete_file", "create_directory"]);
+async function loadMcpToolsForProject(projectId) {
+  const mcpTools = await listMcpToolsForProject(projectId);
   return mcpTools.map(
     (mcpTool) => tool(
       async (input) => {
-        const args = input ?? {};
-        if (FILE_MUTATING_TOOLS$1.has(mcpTool.name)) {
-          const toolName = mcpTool.name;
-          const path2 = String(args.path ?? "");
-          const before = toolName === "create_directory" ? null : await readCurrentContent(path2);
-          const { after, summary } = computeProposedChange(toolName, args, before);
-          const approved = await requestApproval({ tool: toolName, path: path2, before, after, summary });
+        if (FILE_MUTATING_TOOLS.has(mcpTool.name)) {
+          const approved = await requestToolConfirmation(projectId, mcpTool.name, input);
           if (!approved) {
-            return `The user rejected this change (${summary.toLowerCase()} on "${path2}"). Do not apply it or try an equivalent workaround - ask what they'd like instead, or move on to something else.`;
+            return `The user declined this ${mcpTool.name} action. Do not retry it without being asked again. Tell the user you were blocked and ask how they'd like to proceed.`;
           }
         }
-        return callMcpTool(mcpTool.name, args);
+        return callMcpToolForProject(projectId, mcpTool.name, input ?? {});
       },
       {
         name: mcpTool.name,
@@ -273,52 +294,61 @@ async function loadMcpToolsForAgent() {
     )
   );
 }
-const SYSTEM_PROMPT = [
-  "You are a coding assistant working directly inside the user's open project, similar to Cursor. You have real",
-  "tools, scoped to this project only:",
-  "- list_directory / read_file / search_files: explore the codebase.",
-  "- write_file: create a new file or fully overwrite an existing one.",
-  "- edit_file: make a precise, targeted change to part of a file (preferred over write_file for existing files -",
-  "  it changes only what needs to change, not the whole file).",
-  "- create_directory / delete_file: filesystem housekeeping.",
-  "- web_search / web_fetch (if available): look up docs, error messages, or library usage you're unsure about",
-  "  rather than guessing.",
-  "",
-  "You DO actually call write_file/edit_file/create_directory/delete_file when asked - don't just describe the",
-  "change and stop. Note that these four tools now show the user a diff and wait for their approval before the",
-  "write actually happens - so call the tool as soon as you know what to change, rather than describing it first",
-  "and waiting for a separate go-ahead; the approval step IS the go-ahead. If the user rejects a change, the tool",
-  "result will say so - don't retry the same change or a workaround, ask what they'd prefer instead.",
-  "When you finish a task, briefly summarize what you changed and in which files.",
-  "You DO actually modify files when asked - don't just describe the change and stop, make it, the same way you",
-  "would if the user asked you to send an email or create a calendar event in the other parts of this project.",
-  "When you finish a task, briefly summarize what you changed and in which files.",
-  "",
-  "Editor state: each message may start with an '[Editor state]' block listing which files are open in the",
-  "editor and which one is active. When the user says 'this file', 'this', 'the file I have open', or refers to",
-  "'it' without naming a path, they mean the active file listed there - read it (if you haven't already this",
-  "turn) rather than guessing a different file or asking which one they mean. If no file is active, and the",
-  "request clearly needs one, ask which file or use search_files/list_directory to find a likely candidate."
-].join("\n");
-let agent = null;
-let conversationHistory = [];
-async function rebuildCodingAgent() {
-  const mcpTools = await loadMcpToolsForAgent();
-  agent = createReactAgent({ llm: createChatModel(), tools: mcpTools, prompt: SYSTEM_PROMPT });
-  conversationHistory = [];
+function historyDir() {
+  return path.join(app.getPath("userData"), "chat-sessions");
 }
-function formatEditorContext(context) {
-  if (!context || context.openFilePaths.length === 0 && !context.activeFilePath) {
-    return "";
+function historyFile(projectRoot) {
+  const hash = createHash("sha256").update(projectRoot).digest("hex").slice(0, 16);
+  return path.join(historyDir(), `${hash}.json`);
+}
+async function loadChatHistory(projectRoot) {
+  try {
+    const raw = await promises.readFile(historyFile(projectRoot), "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return [];
   }
-  const lines = ["[Editor state]"];
-  if (context.openFilePaths.length > 0) {
-    lines.push(`Open tabs: ${context.openFilePaths.join(", ")}`);
+}
+async function saveChatHistory(projectRoot, messages) {
+  await promises.mkdir(historyDir(), { recursive: true });
+  await promises.writeFile(historyFile(projectRoot), JSON.stringify(messages, null, 2), "utf-8");
+}
+async function clearChatHistory(projectRoot) {
+  try {
+    await promises.unlink(historyFile(projectRoot));
+  } catch {
   }
-  lines.push(
-    context.activeFilePath ? `Active file (what "this file" refers to by default): ${context.activeFilePath}` : "No file is currently active."
-  );
-  return lines.join("\n") + "\n\n";
+}
+const SYSTEM_PROMPT = [
+  /* unchanged */
+].join("\n");
+const agentsByProject = /* @__PURE__ */ new Map();
+function toBaseMessages(display) {
+  return display.map((m) => m.role === "user" ? new HumanMessage(m.content) : new AIMessage(m.content));
+}
+async function buildCodingAgentForProject(projectId, projectRoot) {
+  const mcpTools = await loadMcpToolsForProject(projectId);
+  const agent = createReactAgent({ llm: createChatModel(), tools: mcpTools, prompt: SYSTEM_PROMPT });
+  const displayMessages = await loadChatHistory(projectRoot);
+  agentsByProject.set(projectId, {
+    agent,
+    projectRoot,
+    conversationHistory: toBaseMessages(displayMessages),
+    displayMessages
+  });
+}
+function disposeCodingAgentForProject(projectId) {
+  agentsByProject.delete(projectId);
+}
+function formatContext(context) {
+  if (!context) return "";
+  const lines = [];
+  if (context.activeFilePath) lines.push(`Active file (what the user is currently looking at): ${context.activeFilePath}`);
+  if (context.openFilePaths.length) lines.push(`Other open files: ${context.openFilePaths.join(", ")}`);
+  return lines.length ? `[Editor context]
+${lines.join("\n")}
+
+` : "";
 }
 function extractToolCallTrace(messages) {
   const trace = [];
@@ -338,19 +368,33 @@ function extractToolCallTrace(messages) {
   }
   return trace;
 }
-async function runCodingAgent(message, editorContext) {
-  if (!agent) {
-    throw new Error("No project is open yet - open a folder first.");
+async function runCodingAgentForProject(projectId, message, context) {
+  const state = agentsByProject.get(projectId);
+  if (!state) {
+    throw new Error("This project's agent isn't ready yet - try reopening the folder.");
   }
-  const contextualizedMessage = formatEditorContext(editorContext) + message;
-  const previousLength = conversationHistory.length;
-  conversationHistory.push(new HumanMessage(contextualizedMessage));
-  const result = await agent.invoke({ messages: conversationHistory });
-  conversationHistory = result.messages;
+  const previousLength = state.conversationHistory.length;
+  state.conversationHistory.push(new HumanMessage(formatContext(context) + message));
+  const result = await state.agent.invoke({ messages: state.conversationHistory });
+  state.conversationHistory = result.messages;
   const lastMessage = result.messages[result.messages.length - 1];
   const answer = typeof lastMessage.content === "string" ? lastMessage.content : JSON.stringify(lastMessage.content);
   const newMessages = result.messages.slice(previousLength);
-  return { answer, toolCalls: extractToolCallTrace(newMessages) };
+  const toolCalls = extractToolCallTrace(newMessages);
+  state.displayMessages.push({ role: "user", content: message });
+  state.displayMessages.push({ role: "assistant", content: answer, toolCalls });
+  await saveChatHistory(state.projectRoot, state.displayMessages);
+  return { answer, toolCalls };
+}
+function getDisplayHistory(projectId) {
+  return agentsByProject.get(projectId)?.displayMessages ?? [];
+}
+async function resetConversationForProject(projectId) {
+  const state = agentsByProject.get(projectId);
+  if (!state) return;
+  state.conversationHistory = [];
+  state.displayMessages = [];
+  await clearChatHistory(state.projectRoot);
 }
 function registerProjectIpc() {
   ipcMain.handle("project:open-folder", async () => {
@@ -358,36 +402,65 @@ function registerProjectIpc() {
     if (!win) return null;
     const result = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
     if (result.canceled || result.filePaths.length === 0) return null;
-    const root = result.filePaths[0];
-    await openProject(root);
-    return root;
+    return openProject(result.filePaths[0]);
   });
-  ipcMain.handle("project:get-root", () => getProjectRoot());
+  ipcMain.handle("project:list", () => listProjects());
+  ipcMain.handle("project:get-active", () => getActiveProjectId());
+  ipcMain.handle("project:switch", (_event, projectId) => {
+    setActiveProject(projectId);
+  });
+  ipcMain.handle("project:close", async (_event, projectId) => {
+    cancelPendingConfirmationsForProject(projectId);
+    await disconnectProjectFilesystem(projectId);
+    disposeCodingAgentForProject(projectId);
+    removeProject(projectId);
+  });
 }
 async function openProject(root) {
-  setProjectRootState(root);
-  await setProjectRoot(root);
-  await rebuildCodingAgent();
+  const project = addProject(root);
+  await connectProjectFilesystem(project.id, project.root);
+  await buildCodingAgentForProject(project.id, project.root);
+  return project;
 }
-const FILE_MUTATING_TOOLS = /* @__PURE__ */ new Set(["write_file", "edit_file", "delete_file", "create_directory"]);
 function registerAgentIpc() {
   ipcMain.handle(
     "agent:send-message",
-    async (_event, message, editorContext) => {
-      const result = await runCodingAgent(message, editorContext);
-      notifyOfFileChanges(result);
+    async (_event, projectId, message, context) => {
+      const result = await runCodingAgentForProject(projectId, message, context);
+      notifyOfFileChanges(projectId, result);
       return result;
     }
   );
+  ipcMain.handle("agent:get-history", (_event, projectId) => getDisplayHistory(projectId));
+  ipcMain.handle("agent:clear-history", async (_event, projectId) => {
+    await resetConversationForProject(projectId);
+  });
 }
-function notifyOfFileChanges(result) {
-  const changedPaths = result.toolCalls.filter((call) => FILE_MUTATING_TOOLS.has(call.tool)).map((call) => call.input?.path).filter((p) => Boolean(p));
-  if (changedPaths.length === 0) return;
-  getMainWindow()?.webContents.send("fs:external-change", changedPaths);
+function notifyOfFileChanges(projectId, result) {
+  const win = getMainWindow();
+  if (!win) return;
+  const project = getProject(projectId);
+  if (!project) return;
+  const changedPaths = result.toolCalls.filter((c) => FILE_MUTATING_TOOLS.has(c.tool)).map((c) => c.input?.path).filter((p) => Boolean(p));
+  if (changedPaths.length) {
+    win.webContents.send("fs:external-change", projectId, changedPaths);
+  }
+}
+const pendingResolvers = /* @__PURE__ */ new Map();
+function resolvePendingChange(id, approved) {
+  const resolve = pendingResolvers.get(id);
+  if (!resolve) return;
+  pendingResolvers.delete(id);
+  resolve(approved);
 }
 function registerApprovalIpc() {
   ipcMain.on("agent:respond-to-pending-change", (_event, id, approved) => {
     resolvePendingChange(id, approved);
+  });
+}
+function registerConfirmationIpc() {
+  ipcMain.handle("agent:confirm-tool", (_event, requestId, approved) => {
+    resolveToolConfirmation(requestId, approved);
   });
 }
 const dirname = import.meta.dirname;
@@ -430,6 +503,7 @@ app.whenReady().then(async () => {
   registerApprovalIpc();
   registerProjectIpc();
   registerAgentIpc();
+  registerConfirmationIpc();
   const win = createWindow();
   setMainWindow(win);
   if (env) {

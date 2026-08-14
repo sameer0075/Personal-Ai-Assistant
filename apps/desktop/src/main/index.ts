@@ -7,6 +7,7 @@ import { registerProjectIpc } from "./ipc/project-ipc.js";
 import { registerAgentIpc } from "./ipc/agent-ipc.js";
 import * as mcpClient from "./mcp/mcp-client.service.js";
 import { registerApprovalIpc } from "./ipc/approval-ipc.js";
+import { registerConfirmationIpc } from "./ipc/confirmation-ipc.js";
 
 // import.meta.dirname (stable since Node 20.11) rather than __dirname - this
 // package is ESM ("type": "module"), so the CJS-only __dirname global isn't
@@ -58,6 +59,7 @@ app.whenReady().then(async () => {
   registerApprovalIpc();
   registerProjectIpc();
   registerAgentIpc();
+  registerConfirmationIpc();
 
   const win = createWindow();
   setMainWindow(win);
