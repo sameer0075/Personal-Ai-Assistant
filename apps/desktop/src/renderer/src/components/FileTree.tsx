@@ -1,110 +1,3 @@
-// import { useState } from "react";
-// import Box from "@mui/material/Box";
-// import Stack from "@mui/material/Stack";
-// import Typography from "@mui/material/Typography";
-// import CircularProgress from "@mui/material/CircularProgress";
-// import ChevronRightRoundedIcon from "@mui/icons-material/ChevronRightRounded";
-// import FolderRoundedIcon from "@mui/icons-material/FolderRounded";
-// import InsertDriveFileOutlinedIcon from "@mui/icons-material/InsertDriveFileOutlined";
-// import { tokens } from "../theme/theme";
-
-// interface DirectoryEntry {
-//   name: string;
-//   type: "file" | "directory";
-// }
-
-// interface FileTreeNodeProps {
-//   path: string; // relative to project root
-//   name: string;
-//   type: "file" | "directory";
-//   depth: number;
-//   activePath: string | null;
-//   onFileClick: (path: string) => void;
-// }
-
-// function FileTreeNode({ path, name, type, depth, activePath, onFileClick }: FileTreeNodeProps) {
-//   const [expanded, setExpanded] = useState(false);
-//   const [children, setChildren] = useState<DirectoryEntry[] | null>(null);
-//   const [isLoading, setIsLoading] = useState(false);
-
-//   async function handleToggle() {
-//     if (type === "file") {
-//       onFileClick(path);
-//       return;
-//     }
-
-//     if (!expanded && children === null) {
-//       setIsLoading(true);
-//       try {
-//         setChildren(await window.api.readDirectory(path));
-//       } finally {
-//         setIsLoading(false);
-//       }
-//     }
-//     setExpanded((v) => !v);
-//   }
-
-//   const isActive = type === "file" && path === activePath;
-
-//   return (
-//     <Box>
-//       <Stack
-//         direction="row"
-//         onClick={handleToggle}
-//         sx={{
-//           alignItems: "center",
-//           gap: 0.5,
-//           pl: depth * 1.5 + 0.5,
-//           py: 0.4,
-//           cursor: "pointer",
-//           borderRadius: 1,
-//           bgcolor: isActive ? tokens.accentDim : "transparent",
-//           "&:hover": { bgcolor: isActive ? tokens.accentDim : tokens.panelRaised },
-//         }}
-//       >
-//         {type === "directory" ? (
-//           <ChevronRightRoundedIcon
-//             sx={{ fontSize: 16, color: tokens.mutedDim, transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.1s" }}
-//           />
-//         ) : (
-//           <Box sx={{ width: 16 }} />
-//         )}
-//         {type === "directory" ? (
-//           <FolderRoundedIcon sx={{ fontSize: 15, color: tokens.accentBright }} />
-//         ) : (
-//           <InsertDriveFileOutlinedIcon sx={{ fontSize: 14, color: tokens.muted }} />
-//         )}
-//         <Typography sx={{ fontSize: 12.5, color: isActive ? tokens.text : tokens.muted }}>{name}</Typography>
-//         {isLoading && <CircularProgress size={10} sx={{ ml: 0.5 }} />}
-//       </Stack>
-
-//       {expanded && children && (
-//         <Box>
-//           {children.map((child) => (
-//             <FileTreeNode
-//               key={child.name}
-//               path={`${path === "." ? "" : path + "/"}${child.name}`}
-//               name={child.name}
-//               type={child.type}
-//               depth={depth + 1}
-//               activePath={activePath}
-//               onFileClick={onFileClick}
-//             />
-//           ))}
-//         </Box>
-//       )}
-//     </Box>
-//   );
-// }
-
-// export default function FileTree({ activePath, onFileClick }: { activePath: string | null; onFileClick: (path: string) => void }) {
-//   return (
-//     <Box sx={{ py: 1 }}>
-//       <FileTreeNode path="." name="." type="directory" depth={0} activePath={activePath} onFileClick={onFileClick} />
-//     </Box>
-//   );
-// }
-
 import { useState } from "react";
 
 import Box from "@mui/material/Box";
@@ -116,6 +9,17 @@ import ChevronRightRoundedIcon from "@mui/icons-material/ChevronRightRounded";
 import FolderRoundedIcon from "@mui/icons-material/FolderRounded";
 import InsertDriveFileOutlinedIcon from "@mui/icons-material/InsertDriveFileOutlined";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
+import CodeRoundedIcon from "@mui/icons-material/CodeRounded";
+import JavascriptRoundedIcon from "@mui/icons-material/JavascriptRounded";
+import DataObjectRoundedIcon from "@mui/icons-material/DataObjectRounded";
+import HtmlRoundedIcon from "@mui/icons-material/HtmlRounded";
+import CssRoundedIcon from "@mui/icons-material/CssRounded";
+import ArticleRoundedIcon from "@mui/icons-material/ArticleRounded";
+import TerminalRoundedIcon from "@mui/icons-material/TerminalRounded";
+import ImageRoundedIcon from "@mui/icons-material/ImageRounded";
+import TableChartRoundedIcon from "@mui/icons-material/TableChartRounded";
+import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
+import "@vscode/codicons/dist/codicon.css";
 
 import { tokens } from "../theme/theme";
 
@@ -138,36 +42,126 @@ interface FileTreeNodeProps {
   onFileClick: (path: string) => void;
 }
 
-function getFileColor(name: string) {
+function getFileIcon(name: string) {
   const extension = name.split(".").pop()?.toLowerCase();
 
   switch (extension) {
+    // TypeScript
     case "ts":
+      return {
+        icon: CodeRoundedIcon,
+        color: "#3178c6",
+      };
+
     case "tsx":
-      return "#3178c6";
+      return {
+        icon: CodeRoundedIcon,
+        color: "#61dafb",
+      };
 
+    // JavaScript
     case "js":
+      return {
+        icon: JavascriptRoundedIcon,
+        color: "#f7df1e",
+      };
+
     case "jsx":
-      return "#f7df1e";
+      return {
+        icon: JavascriptRoundedIcon,
+        color: "#61dafb",
+      };
 
+    // JSON
     case "json":
-      return "#cbcb41";
+      return {
+        icon: DataObjectRoundedIcon,
+        color: "#cbcb41",
+      };
 
-    case "css":
-    case "scss":
-      return "#42a5f5";
-
+    // HTML
     case "html":
-      return "#e44d26";
+    case "htm":
+      return {
+        icon: HtmlRoundedIcon,
+        color: "#e44d26",
+      };
 
+    // CSS
+    case "css":
+      return {
+        icon: CssRoundedIcon,
+        color: "#1572b6",
+      };
+
+    case "scss":
+    case "sass":
+      return {
+        icon: CssRoundedIcon,
+        color: "#cd6799",
+      };
+
+    // Markdown / text
     case "md":
-      return "#519aba";
+    case "mdx":
+    case "txt":
+      return {
+        icon: ArticleRoundedIcon,
+        color: "#519aba",
+      };
 
+    // Python
     case "py":
-      return "#3776ab";
+      return {
+        icon: CodeRoundedIcon,
+        color: "#3776ab",
+      };
+
+    // Shell
+    case "sh":
+    case "bash":
+    case "zsh":
+      return {
+        icon: TerminalRoundedIcon,
+        color: "#89e051",
+      };
+
+    // Images
+    case "png":
+    case "jpg":
+    case "jpeg":
+    case "gif":
+    case "svg":
+    case "webp":
+      return {
+        icon: ImageRoundedIcon,
+        color: "#a074c4",
+      };
+
+    // CSV / Excel
+    case "csv":
+    case "xlsx":
+    case "xls":
+      return {
+        icon: TableChartRoundedIcon,
+        color: "#21a366",
+      };
+
+    // Config
+    case "env":
+    case "yaml":
+    case "yml":
+    case "toml":
+      return {
+        icon: SettingsRoundedIcon,
+        color: tokens.muted,
+      };
 
     default:
-      return tokens.muted;
+      return {
+        icon: InsertDriveFileOutlinedIcon,
+        color: tokens.muted,
+      };
   }
 }
 
@@ -257,12 +251,18 @@ function FileTreeNode({
             }}
           />
         ) : (
-          <InsertDriveFileOutlinedIcon
-            sx={{
-              fontSize: 15,
-              color: getFileColor(name),
-            }}
-          />
+          (() => {
+            const { icon: FileIcon, color } = getFileIcon(name);
+
+            return (
+              <FileIcon
+                sx={{
+                  fontSize: 15,
+                  color,
+                }}
+              />
+            );
+          })()
         )}
 
         <Typography

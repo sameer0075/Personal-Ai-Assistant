@@ -1,126 +1,3 @@
-// import Box from "@mui/material/Box";
-// import Stack from "@mui/material/Stack";
-// import Typography from "@mui/material/Typography";
-// import IconButton from "@mui/material/IconButton";
-// import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
-// import CircleIcon from "@mui/icons-material/Circle";
-// import Editor from "@monaco-editor/react";
-// import * as monaco from "monaco-editor";
-// import { tokens } from "../theme/theme";
-
-// export interface OpenTab {
-//   path: string;
-//   content: string;
-//   isDirty: boolean;
-// }
-
-// const EXTENSION_LANGUAGE_MAP: Record<string, string> = {
-//   ts: "typescript",
-//   tsx: "typescript",
-//   js: "javascript",
-//   jsx: "javascript",
-//   json: "json",
-//   css: "css",
-//   scss: "scss",
-//   html: "html",
-//   md: "markdown",
-//   py: "python",
-//   yml: "yaml",
-//   yaml: "yaml",
-//   sql: "sql",
-//   sh: "shell",
-// };
-
-// function languageForPath(path: string): string {
-//   const ext = path.split(".").pop()?.toLowerCase() ?? "";
-//   return EXTENSION_LANGUAGE_MAP[ext] ?? "plaintext";
-// }
-
-// interface EditorPaneProps {
-//   tabs: OpenTab[];
-//   activePath: string | null;
-//   onSelectTab: (path: string) => void;
-//   onCloseTab: (path: string) => void;
-//   onContentChange: (path: string, content: string) => void;
-//   onSave: (path: string) => void;
-// }
-
-// export default function EditorPane({ tabs, activePath, onSelectTab, onCloseTab, onContentChange, onSave }: EditorPaneProps) {
-//   const activeTab = tabs.find((t) => t.path === activePath);
-
-//   if (tabs.length === 0) {
-//     return (
-//       <Box sx={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-//         <Typography sx={{ color: tokens.mutedDim, fontSize: 13 }}>Open a file from the tree to start editing</Typography>
-//       </Box>
-//     );
-//   }
-
-//   return (
-//     <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-//       <Stack direction="row" sx={{ borderBottom: `1px solid ${tokens.border}`, overflowX: "auto" }}>
-//         {tabs.map((tab) => {
-//           const name = tab.path.split("/").pop();
-//           const isActive = tab.path === activePath;
-//           return (
-//             <Stack
-//               key={tab.path}
-//               direction="row"
-//               onClick={() => onSelectTab(tab.path)}
-//               sx={{
-//                 alignItems: "center",
-//                 gap: 0.75,
-//                 px: 1.5,
-//                 py: 0.75,
-//                 cursor: "pointer",
-//                 borderRight: `1px solid ${tokens.border}`,
-//                 borderBottom: isActive ? `2px solid ${tokens.accent}` : "2px solid transparent",
-//                 bgcolor: isActive ? tokens.panel : "transparent",
-//                 flexShrink: 0,
-//               }}
-//             >
-//               <Typography sx={{ fontSize: 12, color: isActive ? tokens.text : tokens.muted, whiteSpace: "nowrap" }}>
-//                 {name}
-//               </Typography>
-//               {tab.isDirty ? (
-//                 <CircleIcon sx={{ fontSize: 7, color: tokens.accentBright }} />
-//               ) : (
-//                 <IconButton
-//                   size="small"
-//                   onClick={(e) => {
-//                     e.stopPropagation();
-//                     onCloseTab(tab.path);
-//                   }}
-//                   sx={{ p: 0.25 }}
-//                 >
-//                   <CloseRoundedIcon sx={{ fontSize: 13, color: tokens.mutedDim }} />
-//                 </IconButton>
-//               )}
-//             </Stack>
-//           );
-//         })}
-//       </Stack>
-
-//       {activeTab && (
-//         <Box sx={{ flex: 1, minHeight: 0 }}>
-//           <Editor
-//             path={activeTab.path}
-//             language={languageForPath(activeTab.path)}
-//             value={activeTab.content}
-//             theme="vs-dark"
-//             onChange={(value) => onContentChange(activeTab.path, value ?? "")}
-//             options={{ fontSize: 13, minimap: { enabled: true }, automaticLayout: true }}
-//             keepCurrentModel
-//             onMount={(editor) => {
-//               editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => onSave(activeTab.path));
-//             }}
-//           />
-//         </Box>
-//       )}
-//     </Box>
-//   );
-// }
-
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
@@ -171,6 +48,92 @@ interface EditorPaneProps {
   onCloseTab: (path: string) => void;
   onContentChange: (path: string, content: string) => void;
   onSave: (path: string) => void;
+}
+
+function registerCodeActions(
+  monaco: typeof import("monaco-editor")
+) {
+  const languages = [
+    "javascript",
+    "typescript",
+    "json",
+    "css",
+    "scss",
+    "html",
+    "markdown",
+    "python",
+    "java",
+    "cpp",
+    "csharp",
+    "go",
+    "rust",
+    "php",
+    "sql",
+    "shell",
+  ];
+
+  const disposables = languages.map((language) =>
+    monaco.languages.registerCodeActionProvider(language, {
+      provideCodeActions(model, range) {
+        const selectedText =
+          model.getValueInRange(range);
+
+        console.log(
+          "Code action:",
+          language,
+          selectedText
+        );
+
+        if (!selectedText.includes("console.log")) {
+          return {
+            actions: [],
+            dispose: () => {},
+          };
+        }
+
+        const action: monaco.languages.CodeAction = {
+          title:
+            "Replace console.log with console.info",
+
+          kind: "quickfix",
+
+          isPreferred: true,
+
+          diagnostics: [],
+
+          edit: {
+            edits: [
+              {
+                resource: model.uri,
+
+                versionId: model.getVersionId(),
+
+                textEdit: {
+                  range,
+
+                  text: selectedText.replace(
+                    "console.log",
+                    "console.info"
+                  ),
+                },
+              },
+            ],
+          },
+        };
+
+        return {
+          actions: [action],
+          dispose: () => {},
+        };
+      },
+    })
+  );
+
+  return () => {
+    disposables.forEach((disposable) =>
+      disposable.dispose()
+    );
+  };
 }
 
 export default function EditorPane({
@@ -395,6 +358,9 @@ export default function EditorPane({
             )}
             value={activeTab.content}
             theme="vs-dark"
+            beforeMount={(monaco) => {
+              registerCodeActions(monaco);
+            }}
             onChange={(value) =>
               onContentChange(
                 activeTab.path,
@@ -436,6 +402,7 @@ export default function EditorPane({
               guides: {
                 indentation: true,
                 bracketPairs: true,
+                highlightActiveBracketPair: true
               },
 
               scrollbar: {
@@ -444,15 +411,39 @@ export default function EditorPane({
               },
             }}
             keepCurrentModel
-            onMount={(editor) => {
-              editor.addCommand(
-                monaco.KeyMod.CtrlCmd |
-                  monaco.KeyCode.KeyS,
-                () => {
-                  onSave(activeTab.path);
-                }
-              );
-            }}
+           onMount={(editor, monaco) => {
+  editor.addCommand(
+    monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+    () => {
+      onSave(activeTab.path);
+    }
+  );
+
+  console.log(
+    "EDITOR LANGUAGE:",
+    editor.getModel()?.getLanguageId()
+  );
+
+  monaco.languages.registerCodeActionProvider("typescript", {
+    provideCodeActions(model:any, range:any) {
+      console.log("🔥 CODE ACTION PROVIDER CALLED");
+
+      console.log("language:", model.getLanguageId());
+      console.log("selected:", model.getValueInRange(range));
+
+      const action: monaco.languages.CodeAction = {
+        title: "🔥 TEST CODE ACTION",
+        kind: "quickfix",
+        isPreferred: true,
+      };
+
+      return {
+        actions: [action],
+        dispose: () => {},
+      };
+    },
+  });
+}}
           />
         </Box>
       )}
