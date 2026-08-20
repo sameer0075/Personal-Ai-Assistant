@@ -16,7 +16,9 @@ import ArrowUpwardRoundedIcon from "@mui/icons-material/ArrowUpwardRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 
 import { tokens } from "@/lib/theme";
-import { createLinkedinPost, deleteLinkedinPost, LinkedinPost, listLinkedinPosts, syncLinkedinToRag } from "@/lib/api/linkedin";
+import ActionApprovalModal from "./ActionApprovalModal";
+import { deleteLinkedinPost, LinkedinPost, listLinkedinPosts, syncLinkedinToRag } from "@/lib/api/linkedin";
+import { createLinkedinDraft, PendingAction } from "@/lib/api/actions";
 
 const MAX_CHARS = 3000;
 
@@ -30,6 +32,9 @@ export default function LinkedInPanel() {
   const [commentary, setCommentary] = useState("");
   const [isPosting, setIsPosting] = useState(false);
   const [deletingUrn, setDeletingUrn] = useState<string | null>(null);
+
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   async function handleLoad() {
     setIsLoading(true);
@@ -62,13 +67,22 @@ export default function LinkedInPanel() {
     setIsPosting(true);
     setError(null);
     try {
-      await createLinkedinPost(commentary);
-      setCommentary("");
-      handleLoad();
+      const draft = await createLinkedinDraft({ commentary });
+      setPendingAction(draft);
+      setReviewOpen(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to publish post");
+      setError(err instanceof Error ? err.message : "Failed to prepare post");
     } finally {
       setIsPosting(false);
+    }
+  }
+
+  function handleDecided(updated: PendingAction) {
+    setReviewOpen(false);
+    setPendingAction(null);
+    if (updated.status === "approved") {
+      setCommentary("");
+      handleLoad();
     }
   }
 
@@ -212,6 +226,13 @@ export default function LinkedInPanel() {
           ))}
         </Stack>
       </Stack>
+
+      <ActionApprovalModal
+        action={pendingAction}
+        open={reviewOpen}
+        onClose={() => setReviewOpen(false)}
+        onDecided={handleDecided}
+      />
     </Paper>
   );
 }

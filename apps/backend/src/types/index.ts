@@ -1,5 +1,29 @@
 export type SourceType = "cv" | "email" | "pr" | "linkedin" | "calendar" | "general";
+export type PendingActionType = "email" | "linkedin_post";
+export type PendingActionStatus = "pending" | "approved" | "rejected";
 
+export interface EmailActionPayload {
+  to: string;
+  subject: string;
+  body: string;
+  cc?: string;
+  attachCv?: boolean
+}
+
+export interface LinkedinActionPayload {
+  commentary: string;
+}
+
+export interface PendingAction {
+  id: string;
+  type: PendingActionType;
+  status: PendingActionStatus;
+  payload: EmailActionPayload | LinkedinActionPayload;
+  createdBy: "agent" | "user";
+  result: Record<string, unknown> | null;
+  createdAt: string;
+  decidedAt: string | null;
+}
 export interface DocumentRecord {
   id: string;
   title: string;
@@ -43,4 +67,5 @@ export interface ToolCallTrace {
 export interface AssistantAnswer {
   answer: string;
   toolCalls: ToolCallTrace[];
+  pendingActions: PendingAction[]
 }

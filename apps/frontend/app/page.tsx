@@ -15,6 +15,7 @@ import Chip from "@mui/material/Chip";
 import Avatar from "@mui/material/Avatar";
 import TextField from "@mui/material/TextField";
 import IconButton from "@mui/material/IconButton";
+import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Tooltip from "@mui/material/Tooltip";
 import Alert from "@mui/material/Alert";
@@ -31,16 +32,20 @@ import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import MailRoundedIcon from "@mui/icons-material/MailRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
+import MailOutlineRoundedIcon from "@mui/icons-material/MailOutlineRounded";
 
 import { tokens } from "@/lib/theme";
 import { askQuestion, uploadCv } from "@/lib/api";
 import { ToolCallTrace } from "@/lib/api/chat";
+import { PendingAction } from "@/lib/api/actions";
 import Sidebar from "@/components/Sidebar";
+import ActionApprovalModal from "@/components/ActionApprovalModal";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
   toolCalls?: ToolCallTrace[];
+  pendingActions?: PendingAction[];
   isError?: boolean;
 }
 
@@ -64,6 +69,9 @@ export default function Home() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedTitle, setUploadedTitle] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<{ message: string; severity: "success" | "error" } | null>(null);
+
+  const [reviewAction, setReviewAction] = useState<PendingAction | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
@@ -98,7 +106,10 @@ export default function Home() {
 
     try {
       const result: any = await askQuestion(trimmed);
-      setMessages((prev) => [...prev, { role: "assistant", content: result.answer, toolCalls: result.toolCalls }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: result.answer, toolCalls: result.toolCalls, pendingActions: result.pendingActions },
+      ]);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong";
       setMessages((prev) => [...prev, { role: "assistant", content: message, isError: true }]);
@@ -115,6 +126,28 @@ export default function Home() {
   function handleNewChat() {
     setMessages([]);
     setQuestion("");
+  }
+
+  function openReview(action: PendingAction) {
+    setReviewAction(action);
+    setReviewOpen(true);
+  }
+
+  function handleDecided(updated: PendingAction) {
+    setReviewOpen(false);
+    setReviewAction(null);
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.pendingActions?.some((a) => a.id === updated.id)
+          ? { ...m, pendingActions: m.pendingActions.map((a) => (a.id === updated.id ? updated : a)) }
+          : m
+      )
+    );
+    setSnackbar(
+      updated.status === "approved"
+        ? { message: updated.type === "email" ? "Email sent." : "Post published.", severity: "success" }
+        : { message: "Draft discarded.", severity: "success" }
+    );
   }
 
   return (
@@ -254,7 +287,7 @@ export default function Home() {
             ) : (
               <Stack spacing={2.5}>
                 {messages.map((m, i) => (
-                  <MessageBubble key={i} message={m} />
+                  <MessageBubble key={i} message={m} onReviewAction={openReview} />
                 ))}
                 {isAsking && (
                   <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
@@ -388,11 +421,18 @@ export default function Home() {
           </Alert>
         ) : undefined}
       </Snackbar>
+
+      <ActionApprovalModal
+        action={reviewAction}
+        open={reviewOpen}
+        onClose={() => setReviewOpen(false)}
+        onDecided={handleDecided}
+      />
     </Box>
   );
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({ message, onReviewAction }: { message: Message; onReviewAction: (action: PendingAction) => void }) {
   const isUser = message.role === "user";
 
   return (
@@ -550,7 +590,6 @@ width: isUser ? "fit-content" : "100%",
                 {children}
               </Box>
             ),
-
             a: ({ children, href }) => (
               <a
                 href={href}
@@ -589,7 +628,65 @@ width: isUser ? "fit-content" : "100%",
             ))}
           </Stack>
         )}
+
+        {message.pendingActions && message.pendingActions.length > 0 && (
+          <Stack spacing={1} sx={{ mt: 1.5 }}>
+            {message.pendingActions.map((action) => (
+              <PendingActionCard key={action.id} action={action} onReview={() => onReviewAction(action)} />
+            ))}
+          </Stack>
+        )}
       </Paper>
     </Stack>
+  );
+}
+
+function PendingActionCard({ action, onReview }: { action: PendingAction; onReview: () => void }) {
+  const isEmail = action.type === "email";
+  const preview =
+    isEmail && "subject" in action.payload
+      ? `To ${action.payload.to} — "${action.payload.subject}"`
+      : "commentary" in action.payload
+        ? action.payload.commentary.slice(0, 80) + (action.payload.commentary.length > 80 ? "…" : "")
+        : "";
+
+  const statusChip =
+    action.status === "pending" ? (
+      <Chip size="small" label="Awaiting your approval" sx={{ bgcolor: tokens.accentDim, color: tokens.accentBright }} />
+    ) : action.status === "approved" ? (
+      <Chip size="small" label={isEmail ? "Sent" : "Published"} sx={{ bgcolor: tokens.panelRaised, color: tokens.text }} />
+    ) : (
+      <Chip size="small" label="Rejected" sx={{ bgcolor: tokens.panelRaised, color: tokens.muted }} />
+    );
+
+  return (
+    <Paper
+      elevation={0}
+      sx={{ p: 1.25, borderRadius: 2, border: `1px solid ${tokens.userBorder}`, bgcolor: tokens.panelRaised }}
+    >
+      <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
+        {isEmail ? (
+          <MailOutlineRoundedIcon sx={{ fontSize: 18, color: tokens.accentBright, mt: 0.25 }} />
+        ) : (
+          <ArrowUpwardRoundedIcon sx={{ fontSize: 18, color: tokens.accentBright, mt: 0.25 }} />
+        )}
+        <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="caption" sx={{ fontWeight: 600, color: tokens.text }}>
+            {isEmail ? "Drafted email" : "Drafted LinkedIn post"}
+          </Typography>
+          <Typography variant="caption" sx={{ color: tokens.muted, overflowWrap: "break-word" }}>
+            {preview}
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center", mt: 0.5 }}>
+            {statusChip}
+            {action.status === "pending" && (
+              <Button size="small" onClick={onReview} sx={{ color: tokens.accentBright }}>
+                Review &amp; approve
+              </Button>
+            )}
+          </Stack>
+        </Stack>
+      </Stack>
+    </Paper>
   );
 }

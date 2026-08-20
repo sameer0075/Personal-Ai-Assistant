@@ -6,6 +6,7 @@ import { gmailRoutes } from "./gmail.routes.js";
 import { calendarRoutes } from "./calendar.routes.js";
 import { linkedinAuthRoutes } from "./linkedin-auth.routes.js";
 import { linkedinRoutes } from "./linkedin.routes.js";
+import { actionsRoutes } from "./actions.routes.js";
 
 export const apiRouter = Router();
 
@@ -16,3 +17,4 @@ apiRouter.use("/gmail", gmailRoutes);
 apiRouter.use("/calendar", calendarRoutes);
 apiRouter.use("/linkedin", linkedinAuthRoutes);
 apiRouter.use("/linkedin", linkedinRoutes);
+apiRouter.use("/actions", actionsRoutes); // NEW

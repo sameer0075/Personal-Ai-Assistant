@@ -16,7 +16,9 @@ import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import SendRoundedIcon from "@mui/icons-material/SendRounded";
 import { tokens } from "@/lib/theme";
-import { GmailMessageSummary, listGmailMessages, sendGmailMessage, syncGmailToRag } from "@/lib/api/gmail";
+import ActionApprovalModal from "./ActionApprovalModal";
+import { GmailMessageSummary, listGmailMessages, syncGmailToRag } from "@/lib/api/gmail";
+import { createEmailDraft, PendingAction } from "@/lib/api/actions";
 
 export default function GmailPanel() {
   const [messages, setMessages] = useState<GmailMessageSummary[]>([]);
@@ -30,7 +32,10 @@ export default function GmailPanel() {
   const [composeTo, setComposeTo] = useState("");
   const [composeSubject, setComposeSubject] = useState("");
   const [composeBody, setComposeBody] = useState("");
-  const [isSending, setIsSending] = useState(false);
+  const [isDrafting, setIsDrafting] = useState(false);
+
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   async function handleLoad() {
     setIsLoading(true);
@@ -50,7 +55,7 @@ export default function GmailPanel() {
     setError(null);
     try {
       const summary = await syncGmailToRag({ query: query || undefined, maxResults: 15 });
-      setSyncNote(`Indexed ${summary.ingested} new, skipped ${summary.skipped} already-known (of ${summary.found}).`);
+      setSyncNote(`Indexed ${summary.ingested} new, skipped ${summary.skipped} already indexed`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to sync to knowledge base");
     } finally {
@@ -58,20 +63,30 @@ export default function GmailPanel() {
     }
   }
 
-  async function handleSend(e: React.FormEvent) {
+  /** Composing no longer sends directly - it drafts, then opens the review modal. */
+  async function handleDraft(e: React.FormEvent) {
     e.preventDefault();
-    setIsSending(true);
+    setIsDrafting(true);
     setError(null);
     try {
-      await sendGmailMessage({ to: composeTo, subject: composeSubject, body: composeBody });
+      const draft = await createEmailDraft({ to: composeTo, subject: composeSubject, body: composeBody });
+      setPendingAction(draft);
+      setReviewOpen(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to prepare message");
+    } finally {
+      setIsDrafting(false);
+    }
+  }
+
+  function handleDecided(updated: PendingAction) {
+    setReviewOpen(false);
+    setPendingAction(null);
+    if (updated.status === "approved") {
       setComposeTo("");
       setComposeSubject("");
       setComposeBody("");
       setComposeOpen(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send message");
-    } finally {
-      setIsSending(false);
     }
   }
 
@@ -95,7 +110,7 @@ export default function GmailPanel() {
         <Collapse in={composeOpen}>
           <Stack
             component="form"
-            onSubmit={handleSend}
+            onSubmit={handleDraft}
             spacing={1.25}
             sx={{ p: 1.5, border: `1px solid ${tokens.border}`, borderRadius: 1.5 }}
           >
@@ -123,15 +138,18 @@ export default function GmailPanel() {
               value={composeBody}
               onChange={(e) => setComposeBody(e.target.value)}
             />
+            <Typography variant="caption" color="text.secondary">
+              This opens a review step before anything is sent.
+            </Typography>
             <Button
               type="submit"
               variant="contained"
               size="small"
-              startIcon={isSending ? <CircularProgress size={14} /> : <SendRoundedIcon sx={{ fontSize: 16 }} />}
-              disabled={isSending}
+              startIcon={isDrafting ? <CircularProgress size={14} /> : <SendRoundedIcon sx={{ fontSize: 15 }} />}
+              disabled={isDrafting}
               sx={{ alignSelf: "flex-start" }}
             >
-              Send
+              Review &amp; send
             </Button>
           </Stack>
         </Collapse>
@@ -176,6 +194,13 @@ export default function GmailPanel() {
           ))}
         </Stack>
       </Stack>
+
+      <ActionApprovalModal
+        action={pendingAction}
+        open={reviewOpen}
+        onClose={() => setReviewOpen(false)}
+        onDecided={handleDecided}
+      />
     </Paper>
   );
 }

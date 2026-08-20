@@ -1,4 +1,5 @@
 import { apiJson } from "./client";
+import type { PendingAction } from "./actions";
 
 export interface ToolCallTrace {
   tool: string;
@@ -9,6 +10,7 @@ export interface ToolCallTrace {
 export interface AssistantAnswer {
   answer: string;
   toolCalls: ToolCallTrace[];
+  pendingActions: PendingAction[];
 }
 
 export function askQuestion(question: string): Promise<AssistantAnswer> {
