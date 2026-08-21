@@ -1,4 +1,4 @@
-export type SourceType = "cv" | "email" | "pr" | "linkedin" | "calendar" | "general";
+export type SourceType = "cv" | "email" | "pr" | "linkedin" | "calendar" | "general" | 'conversation';
 export type PendingActionType = "email" | "linkedin_post";
 export type PendingActionStatus = "pending" | "approved" | "rejected";
 
@@ -8,6 +8,23 @@ export interface EmailActionPayload {
   body: string;
   cc?: string;
   attachCv?: boolean
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatMessageRecord {
+  id: string;
+  sessionId: string;
+  role: "user" | "assistant";
+  content: string;
+  toolCalls: ToolCallTrace[] | null;
+  pendingActionIds: string[] | null;
+  createdAt: string;
 }
 
 export interface LinkedinActionPayload {

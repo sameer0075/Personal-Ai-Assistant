@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import TextareaAutosize from "@mui/material/TextareaAutosize";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -15,7 +15,6 @@ import Chip from "@mui/material/Chip";
 import Avatar from "@mui/material/Avatar";
 import TextField from "@mui/material/TextField";
 import IconButton from "@mui/material/IconButton";
-import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Tooltip from "@mui/material/Tooltip";
 import Alert from "@mui/material/Alert";
@@ -35,9 +34,10 @@ import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import MailOutlineRoundedIcon from "@mui/icons-material/MailOutlineRounded";
 
 import { tokens } from "@/lib/theme";
-import { askQuestion, uploadCv } from "@/lib/api";
-import { ToolCallTrace } from "@/lib/api/chat";
+import { uploadCv } from "@/lib/api";
+import { askQuestion, ToolCallTrace } from "@/lib/api/chat";
 import { PendingAction } from "@/lib/api/actions";
+import { listSessions, getSessionMessages, type ChatSession } from "@/lib/api/sessions";
 import Sidebar from "@/components/Sidebar";
 import ActionApprovalModal from "@/components/ActionApprovalModal";
 
@@ -73,6 +73,11 @@ export default function Home() {
   const [reviewAction, setReviewAction] = useState<PendingAction | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
 
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [isLoadingSession, setIsLoadingSession] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -80,6 +85,20 @@ export default function Home() {
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isAsking]);
+
+  const refreshSessions = useCallback(async () => {
+    try {
+      setSessions(await listSessions());
+    } catch {
+      // fine to fail quietly - sidebar just shows an empty list
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshSessions();
+  }, [refreshSessions]);
 
   async function handleUpload(file: File) {
     setIsUploading(true);
@@ -105,11 +124,13 @@ export default function Home() {
     setIsAsking(true);
 
     try {
-      const result: any = await askQuestion(trimmed);
+      const result: any = await askQuestion(trimmed, activeSessionId ?? undefined);
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: result.answer, toolCalls: result.toolCalls, pendingActions: result.pendingActions },
       ]);
+      setActiveSessionId(result.sessionId);
+      refreshSessions();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong";
       setMessages((prev) => [...prev, { role: "assistant", content: message, isError: true }]);
@@ -126,6 +147,21 @@ export default function Home() {
   function handleNewChat() {
     setMessages([]);
     setQuestion("");
+    setActiveSessionId(null);
+  }
+
+  async function handleSelectSession(sessionId: string) {
+    if (sessionId === activeSessionId) return;
+    setActiveSessionId(sessionId);
+    setIsLoadingSession(true);
+    try {
+      const stored = await getSessionMessages(sessionId);
+      setMessages(stored);
+    } catch (err) {
+      setSnackbar({ message: err instanceof Error ? err.message : "Failed to load chat", severity: "error" });
+    } finally {
+      setIsLoadingSession(false);
+    }
   }
 
   function openReview(action: PendingAction) {
@@ -152,7 +188,13 @@ export default function Home() {
 
   return (
     <Box sx={{ display: "flex", height: "100dvh", bgcolor: tokens.bg }}>
-      <Sidebar />
+      <Sidebar
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        isLoadingSessions={isLoadingSessions}
+        onSelectSession={handleSelectSession}
+        onNewChat={handleNewChat}
+      />
 
       <Box sx={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         {/* Top bar */}
@@ -226,7 +268,11 @@ export default function Home() {
         {/* Chat area */}
         <Box sx={{ flex: 1, overflowY: "auto" }}>
           <Container maxWidth="md" sx={{ py: 4, height: "100%" }}>
-            {messages.length === 0 ? (
+            {isLoadingSession ? (
+              <Stack sx={{ height: "100%", alignItems: "center", justifyContent: "center" }}>
+                <CircularProgress size={20} sx={{ color: tokens.mutedDim }} />
+              </Stack>
+            ) : messages.length === 0 ? (
               <Stack sx={{ height: "100%", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
                 <Box
                   sx={{
@@ -590,6 +636,7 @@ width: isUser ? "fit-content" : "100%",
                 {children}
               </Box>
             ),
+
             a: ({ children, href }) => (
               <a
                 href={href}
@@ -631,8 +678,8 @@ width: isUser ? "fit-content" : "100%",
 
         {message.pendingActions && message.pendingActions.length > 0 && (
           <Stack spacing={1} sx={{ mt: 1.5 }}>
-            {message.pendingActions.map((action) => (
-              <PendingActionCard key={action.id} action={action} onReview={() => onReviewAction(action)} />
+            {message.pendingActions.map((action, i) => (
+              <PendingActionCard key={action.id ?? i} action={action} onReview={() => onReviewAction(action)} />
             ))}
           </Stack>
         )}
@@ -680,9 +727,13 @@ function PendingActionCard({ action, onReview }: { action: PendingAction; onRevi
           <Stack direction="row" spacing={1} sx={{ alignItems: "center", mt: 0.5 }}>
             {statusChip}
             {action.status === "pending" && (
-              <Button size="small" onClick={onReview} sx={{ color: tokens.accentBright }}>
+              <Typography
+                component="button"
+                onClick={onReview}
+                sx={{ fontSize: 12.5, color: tokens.accentBright, bgcolor: "transparent", border: "none", cursor: "pointer", p: 0, fontWeight: 600 }}
+              >
                 Review &amp; approve
-              </Button>
+              </Typography>
             )}
           </Stack>
         </Stack>

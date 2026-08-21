@@ -8,6 +8,7 @@ import { loadMcpToolsForAgent } from "../mcp/mcp-tool-adapter.js";
 import { getPendingAction } from "../actions/pending-actions.service.js";
 import type { AssistantAnswer, PendingAction, ToolCallTrace } from "../../types/index.js";
 
+
 const SYSTEM_PROMPT = [
   "You are the user's personal AI assistant with real access to their tools:",
   "- search_knowledge_base: their CV plus any emails/calendar events/LinkedIn posts already indexed.",
@@ -116,9 +117,17 @@ async function extractPendingActions(toolCalls: ToolCallTrace[]): Promise<Pendin
   return actions.filter((a): a is PendingAction => a !== null);
 }
 
-export async function runAssistantAgent(question: string): Promise<AssistantAnswer> {
+export async function runAssistantAgent(
+  question: string,
+  history: Array<{ role: "user" | "assistant"; content: string }> = []
+): Promise<AssistantAnswer> {
   const agent = await getAgent();
-  const result = await agent.invoke({ messages: [new HumanMessage(question)] });
+
+  const historyMessages = history.map((m) =>
+    m.role === "user" ? new HumanMessage(m.content) : new AIMessage(m.content)
+  );
+
+  const result = await agent.invoke({ messages: [...historyMessages, new HumanMessage(question)] });
 
   const lastMessage = result.messages[result.messages.length - 1];
   const answer = typeof lastMessage.content === "string" ? lastMessage.content : JSON.stringify(lastMessage.content);

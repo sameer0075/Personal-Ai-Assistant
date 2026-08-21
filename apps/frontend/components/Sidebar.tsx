@@ -6,21 +6,32 @@ import { usePathname } from "next/navigation";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import Chip from "@mui/material/Chip";
+import IconButton from "@mui/material/IconButton";
+import Tooltip from "@mui/material/Tooltip";
 import CircularProgress from "@mui/material/CircularProgress";
 import ChatBubbleRoundedIcon from "@mui/icons-material/ChatBubbleRounded";
 import HubRoundedIcon from "@mui/icons-material/HubRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
+import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import { tokens } from "@/lib/theme";
 import { getGoogleStatus, GoogleStatus } from "@/lib/api/google";
+import type { ChatSession } from "@/lib/api/sessions";
 
 const NAV_ITEMS = [
   { href: "/", label: "Chat", icon: ChatBubbleRoundedIcon },
   { href: "/integrations", label: "Integrations", icon: HubRoundedIcon },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  sessions: ChatSession[];
+  activeSessionId: string | null;
+  isLoadingSessions: boolean;
+  onSelectSession: (id: string) => void;
+  onNewChat: () => void;
+}
+
+export default function Sidebar({ sessions, activeSessionId, isLoadingSessions, onSelectSession, onNewChat }: SidebarProps) {
   const pathname = usePathname();
   const [googleStatus, setGoogleStatus] = useState<GoogleStatus | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
@@ -128,7 +139,71 @@ export default function Sidebar() {
         })}
       </Stack>
 
-      <Box sx={{ flexGrow: 1 }} />
+      {/* Chats — NEW */}
+      <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", px: 1, mt: 3, mb: 1 }}>
+        <Typography
+          sx={{
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: tokens.mutedDim,
+          }}
+        >
+          Chats
+        </Typography>
+        <Tooltip title="New chat">
+          <IconButton size="small" onClick={onNewChat} sx={{ color: tokens.muted }}>
+            <AddRoundedIcon sx={{ fontSize: 17 }} />
+          </IconButton>
+        </Tooltip>
+      </Stack>
+
+      <Box sx={{ flexGrow: 1, overflowY: "auto", minHeight: 0 }}>
+        {isLoadingSessions ? (
+          <Stack sx={{ alignItems: "center", py: 2 }}>
+            <CircularProgress size={16} sx={{ color: tokens.mutedDim }} />
+          </Stack>
+        ) : sessions.length === 0 ? (
+          <Typography sx={{ fontSize: 12.5, color: tokens.mutedDim, px: 1.25, py: 1 }}>
+            No chats yet — start one above.
+          </Typography>
+        ) : (
+          <Stack spacing={0.5}>
+            {sessions.map((session) => {
+              const active = session.id === activeSessionId;
+              return (
+                <Box
+                  key={session.id}
+                  onClick={() => onSelectSession(session.id)}
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 1.25,
+                    px: 1.25,
+                    py: 0.9,
+                    borderRadius: 2,
+                    cursor: "pointer",
+                    color: active ? tokens.accentBright : tokens.muted,
+                    bgcolor: active ? tokens.accentDim : "transparent",
+                    fontWeight: active ? 600 : 500,
+                    transition: "background-color 0.15s ease, color 0.15s ease",
+                    "&:hover": {
+                      bgcolor: active ? tokens.accentDim : tokens.panelRaised,
+                      color: active ? tokens.accentBright : tokens.text,
+                    },
+                  }}
+                >
+                  <ChatBubbleRoundedIcon sx={{ fontSize: 15, flexShrink: 0 }} />
+                  <Typography sx={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {session.title}
+                  </Typography>
+                </Box>
+              );
+            })}
+          </Stack>
+        )}
+      </Box>
 
       {/* Footer — live connection status, not just decoration */}
       <Box

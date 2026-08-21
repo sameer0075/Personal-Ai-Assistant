@@ -8,11 +8,13 @@ export interface ToolCallTrace {
 }
 
 export interface AssistantAnswer {
+  sessionId: string;
   answer: string;
   toolCalls: ToolCallTrace[];
   pendingActions: PendingAction[];
 }
 
-export function askQuestion(question: string): Promise<AssistantAnswer> {
-  return apiJson<AssistantAnswer>("/chat", "POST", { question });
+/** Pass sessionId to continue an existing chat; omit it to start a new one. */
+export function askQuestion(question: string, sessionId?: string): Promise<AssistantAnswer> {
+  return apiJson<AssistantAnswer>("/chat", "POST", sessionId ? { question, sessionId } : { question });
 }
