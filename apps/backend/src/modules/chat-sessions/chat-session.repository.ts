@@ -29,6 +29,11 @@ export const chatSessionRepository = {
   },
 
   async deleteSession(id: string): Promise<void> {
+    // ON DELETE CASCADE on chat_messages.session_id handles the messages.
+    // This deliberately never touches documents/document_chunks - conversation
+    // memory indexed for cross-session recall is a separate table with no FK
+    // here, so deleting a chat from the sidebar never erases what the agent
+    // can still recall about it later.
     await pool.query(`DELETE FROM chat_sessions WHERE id = $1`, [id]);
   },
 
@@ -63,6 +68,31 @@ export const chatSessionRepository = {
     );
     await this.touchSession(params.sessionId);
     return rows[0];
+  },
+
+  /** NEW - looked up before an edit, to validate ownership/role and to know where to cut. */
+  async getMessage(id: string): Promise<ChatMessageRecord | null> {
+    const { rows } = await pool.query<ChatMessageRecord>(
+      `SELECT id, session_id AS "sessionId", role, content,
+              tool_calls AS "toolCalls", pending_action_ids AS "pendingActionIds",
+              created_at AS "createdAt"
+       FROM chat_messages WHERE id = $1`,
+      [id]
+    );
+    return rows[0] ?? null;
+  },
+
+  /**
+   * NEW - deletes a message and everything after it in the same session
+   * (by timestamp). Used when editing: the edited message and its old
+   * reply (plus anything sent after it) are removed, then a fresh turn is
+   * recorded in their place.
+   */
+  async deleteMessagesFrom(sessionId: string, fromCreatedAt: string): Promise<void> {
+    await pool.query(`DELETE FROM chat_messages WHERE session_id = $1 AND created_at >= $2`, [
+      sessionId,
+      fromCreatedAt,
+    ]);
   },
 
   async getRecentMessages(sessionId: string, limit: number): Promise<ChatMessageRecord[]> {

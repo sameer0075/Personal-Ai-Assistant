@@ -21,6 +21,7 @@ sessionsRoutes.get("/:id/messages", async (req, res) => {
             )
           : [];
         return {
+          id: m.id, // NEW - needed for editing
           role: m.role,
           content: m.content,
           toolCalls: m.toolCalls ?? [],

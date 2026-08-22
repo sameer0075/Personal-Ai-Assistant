@@ -15,6 +15,7 @@ import Chip from "@mui/material/Chip";
 import Avatar from "@mui/material/Avatar";
 import TextField from "@mui/material/TextField";
 import IconButton from "@mui/material/IconButton";
+import Button from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Tooltip from "@mui/material/Tooltip";
 import Alert from "@mui/material/Alert";
@@ -32,16 +33,20 @@ import MailRoundedIcon from "@mui/icons-material/MailRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import MailOutlineRoundedIcon from "@mui/icons-material/MailOutlineRounded";
+import EditRoundedIcon from "@mui/icons-material/EditRounded";
+import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
+import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 
 import { tokens } from "@/lib/theme";
 import { uploadCv } from "@/lib/api";
-import { askQuestion, ToolCallTrace } from "@/lib/api/chat";
+import { askQuestion, editMessage, ToolCallTrace } from "@/lib/api/chat";
 import { PendingAction } from "@/lib/api/actions";
-import { listSessions, getSessionMessages, type ChatSession } from "@/lib/api/sessions";
+import { listSessions, getSessionMessages, deleteSession, type ChatSession } from "@/lib/api/sessions";
 import Sidebar from "@/components/Sidebar";
 import ActionApprovalModal from "@/components/ActionApprovalModal";
 
 interface Message {
+  id?: string; // present once persisted - required to edit a message
   role: "user" | "assistant";
   content: string;
   toolCalls?: ToolCallTrace[];
@@ -90,7 +95,7 @@ export default function Home() {
     try {
       setSessions(await listSessions());
     } catch {
-      // fine to fail quietly - sidebar just shows an empty list
+      // sidebar just shows an empty list - not worth a snackbar for this
     } finally {
       setIsLoadingSessions(false);
     }
@@ -125,14 +130,59 @@ export default function Home() {
 
     try {
       const result: any = await askQuestion(trimmed, activeSessionId ?? undefined);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: result.answer, toolCalls: result.toolCalls, pendingActions: result.pendingActions },
-      ]);
+      setMessages((prev) => {
+        const next = [...prev];
+        next[next.length - 1] = { ...next[next.length - 1], id: result.userMessageId };
+        next.push({
+          id: result.assistantMessageId,
+          role: "assistant",
+          content: result.answer,
+          toolCalls: result.toolCalls,
+          pendingActions: result.pendingActions,
+        });
+        return next;
+      });
       setActiveSessionId(result.sessionId);
       refreshSessions();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong";
+      setMessages((prev) => [...prev, { role: "assistant", content: message, isError: true }]);
+    } finally {
+      setIsAsking(false);
+    }
+  }
+
+  /**
+   * Edits a previously-sent user message. Truncates the visible thread down
+   * to (and replacing) that message, then re-runs the turn - the old reply
+   * and anything sent after it are gone, both locally and in the DB.
+   */
+  async function handleEditMessage(messageId: string, newContent: string) {
+    if (!activeSessionId || isAsking) return;
+    const trimmed = newContent.trim();
+    if (!trimmed) return;
+
+    const idx = messages.findIndex((m) => m.id === messageId);
+    if (idx === -1) return;
+
+    setMessages((prev) => [...prev.slice(0, idx), { id: messageId, role: "user", content: trimmed }]);
+    setIsAsking(true);
+
+    try {
+      const result: any = await editMessage(activeSessionId, messageId, trimmed);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: result.assistantMessageId,
+          role: "assistant",
+          content: result.answer,
+          toolCalls: result.toolCalls,
+          pendingActions: result.pendingActions,
+        },
+      ]);
+      refreshSessions();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update message";
       setMessages((prev) => [...prev, { role: "assistant", content: message, isError: true }]);
     } finally {
       setIsAsking(false);
@@ -161,6 +211,19 @@ export default function Home() {
       setSnackbar({ message: err instanceof Error ? err.message : "Failed to load chat", severity: "error" });
     } finally {
       setIsLoadingSession(false);
+    }
+  }
+
+  /** Removes a chat from the sidebar. Its indexed conversation memory (search_knowledge_base) is untouched. */
+  async function handleDeleteSession(sessionId: string) {
+    try {
+      await deleteSession(sessionId);
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      if (sessionId === activeSessionId) {
+        handleNewChat();
+      }
+    } catch (err) {
+      setSnackbar({ message: err instanceof Error ? err.message : "Failed to delete chat", severity: "error" });
     }
   }
 
@@ -194,6 +257,7 @@ export default function Home() {
         isLoadingSessions={isLoadingSessions}
         onSelectSession={handleSelectSession}
         onNewChat={handleNewChat}
+        onDeleteSession={handleDeleteSession}
       />
 
       <Box sx={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
@@ -333,7 +397,13 @@ export default function Home() {
             ) : (
               <Stack spacing={2.5}>
                 {messages.map((m, i) => (
-                  <MessageBubble key={i} message={m} onReviewAction={openReview} />
+                  <MessageBubble
+                    key={m.id ?? i}
+                    message={m}
+                    onReviewAction={openReview}
+                    onEditMessage={handleEditMessage}
+                    disabled={isAsking}
+                  />
                 ))}
                 {isAsking && (
                   <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
@@ -478,8 +548,31 @@ export default function Home() {
   );
 }
 
-function MessageBubble({ message, onReviewAction }: { message: Message; onReviewAction: (action: PendingAction) => void }) {
+function MessageBubble({
+  message,
+  onReviewAction,
+  onEditMessage,
+  disabled,
+}: {
+  message: Message;
+  onReviewAction: (action: PendingAction) => void;
+  onEditMessage: (messageId: string, newContent: string) => void;
+  disabled: boolean;
+}) {
   const isUser = message.role === "user";
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(message.content);
+
+  function startEdit() {
+    setDraft(message.content);
+    setIsEditing(true);
+  }
+
+  function saveEdit() {
+    if (!message.id) return;
+    setIsEditing(false);
+    onEditMessage(message.id, draft);
+  }
 
   return (
     <Stack
@@ -500,190 +593,229 @@ function MessageBubble({ message, onReviewAction }: { message: Message; onReview
         {isUser ? <PersonRoundedIcon sx={{ fontSize: 16 }} /> : <SmartToyRoundedIcon sx={{ fontSize: 16 }} />}
       </Avatar>
 
-      <Paper
-        elevation={0}
-        sx={{
-          p: 1.75,
-          maxWidth: isUser ? "75%" : "80%",
-width: isUser ? "fit-content" : "100%",
-          borderRadius: isUser ? "14px 4px 14px 14px" : "4px 14px 14px 14px",
-          border: `1px solid ${message.isError ? tokens.danger : isUser ? tokens.userBorder : tokens.border}`,
-          bgcolor: message.isError ? tokens.dangerDim : isUser ? tokens.userTint : tokens.panel,
-        }}
-      >
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          rehypePlugins={[rehypeHighlight]}
-          components={{
-            p: ({ children }) => (
-              <Typography
-                variant="body2"
-                sx={{
-                  color: message.isError ? tokens.danger : tokens.text,
-                  mb: 1.5,
-                  lineHeight: 1.7,
-                }}
-              >
-                {children}
-              </Typography>
-            ),
-
-            h1: ({ children }) => (
-              <Typography variant="h4" sx={{ mt: 2, mb: 1, fontWeight: 700 }}>
-                {children}
-              </Typography>
-            ),
-
-            h2: ({ children }) => (
-              <Typography variant="h5" sx={{ mt: 2, mb: 1, fontWeight: 700 }}>
-                {children}
-              </Typography>
-            ),
-
-            h3: ({ children }) => (
-              <Typography variant="h6" sx={{ mt: 2, mb: 1, fontWeight: 700 }}>
-                {children}
-              </Typography>
-            ),
-
-            ul: ({ children }) => (
-              <Box component="ul" sx={{ pl: 3, mb: 2 }}>
-                {children}
-              </Box>
-            ),
-
-            ol: ({ children }) => (
-              <Box component="ol" sx={{ pl: 3, mb: 2 }}>
-                {children}
-              </Box>
-            ),
-
-            li: ({ children }) => (
-              <Box component="li" sx={{ mb: 0.5 }}>
-                {children}
-              </Box>
-            ),
-
-            blockquote: ({ children }) => (
-              <Box
-                sx={{
-                  borderLeft: "4px solid #4f46e5",
-                  pl: 2,
-                  my: 2,
-                  color: "text.secondary",
-                  fontStyle: "italic",
-                }}
-              >
-                {children}
-              </Box>
-            ),
-
-            code({ inline, className, children, ...props }: any) {
-              if (inline) {
-                return (
-                  <Box
-                    component="code"
+      <Stack spacing={0.5} sx={{ maxWidth: isUser ? "75%" : "80%", width: isUser ? "fit-content" : "100%" }}>
+        {isEditing ? (
+          <Paper
+            elevation={0}
+            sx={{ p: 1.25, borderRadius: "14px 4px 14px 14px", border: `1px solid ${tokens.accent}`, bgcolor: tokens.userTint }}
+          >
+            <TextField
+              autoFocus
+              fullWidth
+              multiline
+              variant="standard"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              slotProps={{ input: { disableUnderline: true } }}
+              sx={{ "& .MuiInputBase-input": { fontSize: 14, color: tokens.text } }}
+            />
+            <Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end", mt: 0.5 }}>
+              <IconButton size="small" onClick={() => setIsEditing(false)} sx={{ color: tokens.muted }}>
+                <CloseRoundedIcon sx={{ fontSize: 16 }} />
+              </IconButton>
+              <IconButton size="small" onClick={saveEdit} disabled={!draft.trim()} sx={{ color: tokens.accentBright }}>
+                <CheckRoundedIcon sx={{ fontSize: 16 }} />
+              </IconButton>
+            </Stack>
+          </Paper>
+        ) : (
+          <Paper
+            elevation={0}
+            sx={{
+              p: 1.75,
+              borderRadius: isUser ? "14px 4px 14px 14px" : "4px 14px 14px 14px",
+              border: `1px solid ${message.isError ? tokens.danger : isUser ? tokens.userBorder : tokens.border}`,
+              bgcolor: message.isError ? tokens.dangerDim : isUser ? tokens.userTint : tokens.panel,
+            }}
+          >
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeHighlight]}
+              components={{
+                p: ({ children }) => (
+                  <Typography
+                    variant="body2"
                     sx={{
-                      px: 0.6,
-                      py: 0.2,
-                      borderRadius: 1,
-                      bgcolor: "#2d2d2d",
-                      color: "#ffcb6b",
-                      fontFamily: "monospace",
-                      fontSize: "0.9em",
+                      color: message.isError ? tokens.danger : tokens.text,
+                      mb: 1.5,
+                      lineHeight: 1.7,
                     }}
-                    {...props}
+                  >
+                    {children}
+                  </Typography>
+                ),
+
+                h1: ({ children }) => (
+                  <Typography variant="h4" sx={{ mt: 2, mb: 1, fontWeight: 700 }}>
+                    {children}
+                  </Typography>
+                ),
+
+                h2: ({ children }) => (
+                  <Typography variant="h5" sx={{ mt: 2, mb: 1, fontWeight: 700 }}>
+                    {children}
+                  </Typography>
+                ),
+
+                h3: ({ children }) => (
+                  <Typography variant="h6" sx={{ mt: 2, mb: 1, fontWeight: 700 }}>
+                    {children}
+                  </Typography>
+                ),
+
+                ul: ({ children }) => (
+                  <Box component="ul" sx={{ pl: 3, mb: 2 }}>
+                    {children}
+                  </Box>
+                ),
+
+                ol: ({ children }) => (
+                  <Box component="ol" sx={{ pl: 3, mb: 2 }}>
+                    {children}
+                  </Box>
+                ),
+
+                li: ({ children }) => (
+                  <Box component="li" sx={{ mb: 0.5 }}>
+                    {children}
+                  </Box>
+                ),
+
+                blockquote: ({ children }) => (
+                  <Box
+                    sx={{
+                      borderLeft: "4px solid #4f46e5",
+                      pl: 2,
+                      my: 2,
+                      color: "text.secondary",
+                      fontStyle: "italic",
+                    }}
                   >
                     {children}
                   </Box>
-                );
-              }
+                ),
 
-              return (
-                <Box
-                  component="pre"
-                  sx={{
-                    p: 2,
-                    borderRadius: 2,
-                    overflowX: "auto",
-                    bgcolor: "#0d1117",
-                    my: 2,
-                  }}
-                >
-                  <code className={className} {...props}>
+                code({ inline, className, children, ...props }: any) {
+                  if (inline) {
+                    return (
+                      <Box
+                        component="code"
+                        sx={{
+                          px: 0.6,
+                          py: 0.2,
+                          borderRadius: 1,
+                          bgcolor: "#2d2d2d",
+                          color: "#ffcb6b",
+                          fontFamily: "monospace",
+                          fontSize: "0.9em",
+                        }}
+                        {...props}
+                      >
+                        {children}
+                      </Box>
+                    );
+                  }
+
+                  return (
+                    <Box
+                      component="pre"
+                      sx={{
+                        p: 2,
+                        borderRadius: 2,
+                        overflowX: "auto",
+                        bgcolor: "#0d1117",
+                        my: 2,
+                      }}
+                    >
+                      <code className={className} {...props}>
+                        {children}
+                      </code>
+                    </Box>
+                  );
+                },
+
+                table: ({ children }) => (
+                  <Box
+                    component="table"
+                    sx={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      my: 2,
+                      "& th, & td": {
+                        border: "1px solid #444",
+                        p: 1,
+                      },
+                      "& th": {
+                        bgcolor: "#222",
+                      },
+                    }}
+                  >
                     {children}
-                  </code>
-                </Box>
-              );
-            },
+                  </Box>
+                ),
 
-            table: ({ children }) => (
-              <Box
-                component="table"
-                sx={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  my: 2,
-                  "& th, & td": {
-                    border: "1px solid #444",
-                    p: 1,
-                  },
-                  "& th": {
-                    bgcolor: "#222",
-                  },
-                }}
-              >
-                {children}
-              </Box>
-            ),
+                a: ({ children, href }) => (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      color: "#60a5fa",
+                    }}
+                  >
+                    {children}
+                  </a>
+                ),
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
 
-            a: ({ children, href }) => (
-              <a
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  color: "#60a5fa",
-                }}
-              >
-                {children}
-              </a>
-            ),
-          }}
-        >
-          {message.content}
-        </ReactMarkdown>
+            {message.toolCalls && message.toolCalls.length > 0 && (
+              <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap", mt: 1.5 }}>
+                {message.toolCalls.map((call, j) => (
+                  <Tooltip
+                    key={j}
+                    title={typeof call.input === "object" ? JSON.stringify(call.input) : String(call.input)}
+                  >
+                    <Chip
+                      size="small"
+                      icon={<BuildRoundedIcon sx={{ fontSize: 13 }} />}
+                      label={call.tool}
+                      sx={{
+                        bgcolor: tokens.panelRaised,
+                        border: `1px solid ${tokens.border}`,
+                        color: tokens.muted,
+                      }}
+                    />
+                  </Tooltip>
+                ))}
+              </Stack>
+            )}
 
-        {message.toolCalls && message.toolCalls.length > 0 && (
-          <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap", mt: 1.5 }}>
-            {message.toolCalls.map((call, j) => (
-              <Tooltip
-                key={j}
-                title={typeof call.input === "object" ? JSON.stringify(call.input) : String(call.input)}
-              >
-                <Chip
-                  size="small"
-                  icon={<BuildRoundedIcon sx={{ fontSize: 13 }} />}
-                  label={call.tool}
-                  sx={{
-                    bgcolor: tokens.panelRaised,
-                    border: `1px solid ${tokens.border}`,
-                    color: tokens.muted,
-                  }}
-                />
-              </Tooltip>
-            ))}
-          </Stack>
+            {message.pendingActions && message.pendingActions.length > 0 && (
+              <Stack spacing={1} sx={{ mt: 1.5 }}>
+                {message.pendingActions.map((action, i) => (
+                  <PendingActionCard key={action.id ?? i} action={action} onReview={() => onReviewAction(action)} />
+                ))}
+              </Stack>
+            )}
+          </Paper>
         )}
 
-        {message.pendingActions && message.pendingActions.length > 0 && (
-          <Stack spacing={1} sx={{ mt: 1.5 }}>
-            {message.pendingActions.map((action, i) => (
-              <PendingActionCard key={action.id ?? i} action={action} onReview={() => onReviewAction(action)} />
-            ))}
+        {/* Edit affordance - only for your own already-persisted messages */}
+        {isUser && !isEditing && message.id && !message.isError && (
+          <Stack direction="row" sx={{ justifyContent: "flex-end", px: 0.5 }}>
+            <Tooltip title="Edit message">
+              <span>
+                <IconButton size="small" onClick={startEdit} disabled={disabled} sx={{ color: tokens.mutedDim, p: 0.4 }}>
+                  <EditRoundedIcon sx={{ fontSize: 13 }} />
+                </IconButton>
+              </span>
+            </Tooltip>
           </Stack>
         )}
-      </Paper>
+      </Stack>
     </Stack>
   );
 }

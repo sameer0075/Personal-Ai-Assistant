@@ -5,6 +5,7 @@ import {
   getOrCreateSession,
   getHistoryForAgent,
   recordTurn,
+  editUserMessage,
   indexTurnForRecall,
 } from "../modules/chat-sessions/chat-session.service.js";
 
@@ -23,10 +24,41 @@ chatRoutes.post("/", async (req, res) => {
     const history = await getHistoryForAgent(session.id);
     const result = await runAssistantAgent(question, history);
 
-    await recordTurn(session.id, question, result);
+    const { userMessageId, assistantMessageId } = await recordTurn(session.id, question, result);
     indexTurnForRecall(session.id, question, result.answer);
 
-    res.json({ sessionId: session.id, ...result });
+    res.json({ sessionId: session.id, userMessageId, assistantMessageId, ...result });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    res.status(422).json({ error: message });
+  }
+});
+
+const editRequestSchema = z.object({
+  sessionId: z.string().uuid(),
+  messageId: z.string().uuid(),
+  question: z.string().min(1, "question is required"),
+});
+
+/**
+ * POST /api/chat/edit
+ * Deletes `messageId` (must be your own message in that session) and
+ * everything after it - including its old reply - then runs a fresh turn
+ * with the edited question. Same response shape as POST /api/chat.
+ */
+chatRoutes.post("/edit", async (req, res) => {
+  try {
+    const { sessionId, messageId, question } = editRequestSchema.parse(req.body);
+
+    await editUserMessage(sessionId, messageId);
+
+    const history = await getHistoryForAgent(sessionId);
+    const result = await runAssistantAgent(question, history);
+
+    const { userMessageId, assistantMessageId } = await recordTurn(sessionId, question, result);
+    indexTurnForRecall(sessionId, question, result.answer);
+
+    res.json({ sessionId, userMessageId, assistantMessageId, ...result });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     res.status(422).json({ error: message });

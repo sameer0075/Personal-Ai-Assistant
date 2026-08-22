@@ -14,6 +14,7 @@ import HubRoundedIcon from "@mui/icons-material/HubRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
+import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import { tokens } from "@/lib/theme";
 import { getGoogleStatus, GoogleStatus } from "@/lib/api/google";
 import type { ChatSession } from "@/lib/api/sessions";
@@ -29,12 +30,21 @@ interface SidebarProps {
   isLoadingSessions: boolean;
   onSelectSession: (id: string) => void;
   onNewChat: () => void;
+  onDeleteSession: (id: string) => void;
 }
 
-export default function Sidebar({ sessions, activeSessionId, isLoadingSessions, onSelectSession, onNewChat }: SidebarProps) {
+export default function Sidebar({
+  sessions,
+  activeSessionId,
+  isLoadingSessions,
+  onSelectSession,
+  onNewChat,
+  onDeleteSession,
+}: SidebarProps) {
   const pathname = usePathname();
   const [googleStatus, setGoogleStatus] = useState<GoogleStatus | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -49,6 +59,15 @@ export default function Sidebar({ sessions, activeSessionId, isLoadingSessions, 
   useEffect(() => {
     loadStatus();
   }, [loadStatus]);
+
+  function handleDeleteClick(e: React.MouseEvent, session: ChatSession) {
+    e.stopPropagation();
+    if (!window.confirm(`Delete "${session.title}"? This only removes the chat - anything it remembers stays searchable.`)) {
+      return;
+    }
+    setDeletingId(session.id);
+    onDeleteSession(session.id);
+  }
 
   return (
     <Box
@@ -65,7 +84,6 @@ export default function Sidebar({ sessions, activeSessionId, isLoadingSessions, 
         py: 2.5,
       }}
     >
-      {/* Brand */}
       <Stack direction="row" spacing={1.25} sx={{ alignItems: "center", px: 0.5, mb: 3 }}>
         <Box
           sx={{
@@ -90,7 +108,6 @@ export default function Sidebar({ sessions, activeSessionId, isLoadingSessions, 
         </Stack>
       </Stack>
 
-      {/* Nav */}
       <Typography
         sx={{
           fontSize: 11,
@@ -139,7 +156,6 @@ export default function Sidebar({ sessions, activeSessionId, isLoadingSessions, 
         })}
       </Stack>
 
-      {/* Chats — NEW */}
       <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", px: 1, mt: 3, mb: 1 }}>
         <Typography
           sx={{
@@ -173,14 +189,15 @@ export default function Sidebar({ sessions, activeSessionId, isLoadingSessions, 
             {sessions.map((session) => {
               const active = session.id === activeSessionId;
               return (
-                <Box
+                <Stack
                   key={session.id}
+                  direction="row"
                   onClick={() => onSelectSession(session.id)}
                   sx={{
-                    display: "flex",
                     alignItems: "center",
-                    gap: 1.25,
-                    px: 1.25,
+                    gap: 0.5,
+                    pl: 1.25,
+                    pr: 0.5,
                     py: 0.9,
                     borderRadius: 2,
                     cursor: "pointer",
@@ -191,21 +208,48 @@ export default function Sidebar({ sessions, activeSessionId, isLoadingSessions, 
                     "&:hover": {
                       bgcolor: active ? tokens.accentDim : tokens.panelRaised,
                       color: active ? tokens.accentBright : tokens.text,
+                      "& .session-delete-btn": { opacity: 1 },
                     },
                   }}
                 >
                   <ChatBubbleRoundedIcon sx={{ fontSize: 15, flexShrink: 0 }} />
-                  <Typography sx={{ fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  <Typography
+                    sx={{
+                      fontSize: 13,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      flex: 1,
+                      minWidth: 0,
+                    }}
+                  >
                     {session.title}
                   </Typography>
-                </Box>
+                  <IconButton
+                    size="small"
+                    className="session-delete-btn"
+                    onClick={(e) => handleDeleteClick(e, session)}
+                    disabled={deletingId === session.id}
+                    sx={{
+                      opacity: 0,
+                      transition: "opacity 0.15s ease",
+                      color: tokens.mutedDim,
+                      "&:hover": { color: tokens.danger },
+                    }}
+                  >
+                    {deletingId === session.id ? (
+                      <CircularProgress size={13} />
+                    ) : (
+                      <DeleteOutlineRoundedIcon sx={{ fontSize: 15 }} />
+                    )}
+                  </IconButton>
+                </Stack>
               );
             })}
           </Stack>
         )}
       </Box>
 
-      {/* Footer — live connection status, not just decoration */}
       <Box
         component={Link}
         href="/integrations"
