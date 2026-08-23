@@ -36,10 +36,11 @@ import MailOutlineRoundedIcon from "@mui/icons-material/MailOutlineRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
+import { askQuestionStream, editMessageStream, AssistantAnswer, ToolCallTrace } from "@/lib/api/chat";
 
 import { tokens } from "@/lib/theme";
 import { uploadCv } from "@/lib/api";
-import { askQuestion, editMessage, ToolCallTrace } from "@/lib/api/chat";
+import { askQuestion, editMessage } from "@/lib/api/chat";
 import { PendingAction } from "@/lib/api/actions";
 import { listSessions, getSessionMessages, deleteSession, type ChatSession } from "@/lib/api/sessions";
 import Sidebar from "@/components/Sidebar";
@@ -52,6 +53,7 @@ interface Message {
   toolCalls?: ToolCallTrace[];
   pendingActions?: PendingAction[];
   isError?: boolean;
+  isStreaming?: boolean;
 }
 
 const MAX_CHARS = 10000;
@@ -105,18 +107,68 @@ export default function Home() {
     refreshSessions();
   }, [refreshSessions]);
 
-  async function handleUpload(file: File) {
-    setIsUploading(true);
-    try {
-      const result = await uploadCv(file);
-      setUploadedTitle(result.title);
-      setSnackbar({ message: `Indexed "${result.title}" — ${result.chunkCount} chunks`, severity: "success" });
-    } catch (err) {
-      setSnackbar({ message: err instanceof Error ? err.message : "Upload failed", severity: "error" });
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
+    function appendAssistantTokenAndUpdateTool(update: (m: Message) => Message) {
+    setMessages((prev) => {
+      const next = [...prev];
+      const lastIdx = next.length - 1;
+      if (lastIdx >= 0) next[lastIdx] = update(next[lastIdx]);
+      return next;
+    });
+  }
+
+  /** Sets the id on the user message that started this turn (the one right before the streaming placeholder). */
+  function setUserMessageId(userMessageId: string) {
+    setMessages((prev) => {
+      const next = [...prev];
+      const idx = next.length - 2;
+      if (idx >= 0 && next[idx].role === "user") next[idx] = { ...next[idx], id: userMessageId };
+      return next;
+    });
+  }
+
+  function streamHandlers(onDone: () => void, onSessionId?: (id: string) => void) {
+    return {
+      onSession: (sessionId: string) => onSessionId?.(sessionId),
+      onToken: (content: string) => {
+        appendAssistantTokenAndUpdateTool((m) => ({ ...m, content: m.content + content }));
+      },
+      onToolStart: (tool: string, input: unknown) => {
+        appendAssistantTokenAndUpdateTool((m) => ({
+          ...m,
+          toolCalls: [...(m.toolCalls ?? []), { tool, input }],
+        }));
+      },
+      onToolEnd: (tool: string, output?: string) => {
+        appendAssistantTokenAndUpdateTool((m) => {
+          const toolCalls = [...(m.toolCalls ?? [])];
+          const idx = toolCalls.map((c) => c.tool === tool && c.output === undefined).lastIndexOf(true);
+          if (idx !== -1) toolCalls[idx] = { ...toolCalls[idx], output };
+          return { ...m, toolCalls };
+        });
+      },
+      onComplete: (data: AssistantAnswer) => {
+        setUserMessageId(data.userMessageId);
+        appendAssistantTokenAndUpdateTool((m) => ({
+          ...m,
+          id: data.assistantMessageId,
+          content: data.answer,
+          toolCalls: data.toolCalls,
+          pendingActions: data.pendingActions,
+          isStreaming: false,
+        }));
+        setActiveSessionId(data.sessionId);
+        refreshSessions();
+        onDone();
+      },
+      onError: (message: string) => {
+        appendAssistantTokenAndUpdateTool((m) =>
+          m.content
+            ? { ...m, isStreaming: false }
+            : { ...m, content: message, isError: true, isStreaming: false }
+        );
+        onDone();
+      },
+    };
   }
 
   async function handleAsk(e: React.FormEvent) {
@@ -124,30 +176,23 @@ export default function Home() {
     const trimmed = question.trim();
     if (!trimmed || isAsking) return;
 
-    setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: trimmed },
+      { role: "assistant", content: "", toolCalls: [], isStreaming: true },
+    ]);
     setQuestion("");
     setIsAsking(true);
 
     try {
-      const result: any = await askQuestion(trimmed, activeSessionId ?? undefined);
-      setMessages((prev) => {
-        const next = [...prev];
-        next[next.length - 1] = { ...next[next.length - 1], id: result.userMessageId };
-        next.push({
-          id: result.assistantMessageId,
-          role: "assistant",
-          content: result.answer,
-          toolCalls: result.toolCalls,
-          pendingActions: result.pendingActions,
-        });
-        return next;
-      });
-      setActiveSessionId(result.sessionId);
-      refreshSessions();
+      await askQuestionStream(
+        trimmed,
+        activeSessionId ?? undefined,
+        streamHandlers(() => setIsAsking(false))
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong";
-      setMessages((prev) => [...prev, { role: "assistant", content: message, isError: true }]);
-    } finally {
+      appendAssistantTokenAndUpdateTool((m) => ({ ...m, content: message, isError: true, isStreaming: false }));
       setIsAsking(false);
     }
   }
@@ -165,27 +210,38 @@ export default function Home() {
     const idx = messages.findIndex((m) => m.id === messageId);
     if (idx === -1) return;
 
-    setMessages((prev) => [...prev.slice(0, idx), { id: messageId, role: "user", content: trimmed }]);
+    setMessages((prev) => [
+      ...prev.slice(0, idx),
+      { id: messageId, role: "user", content: trimmed },
+      { role: "assistant", content: "", toolCalls: [], isStreaming: true },
+    ]);
     setIsAsking(true);
 
     try {
-      const result: any = await editMessage(activeSessionId, messageId, trimmed);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: result.assistantMessageId,
-          role: "assistant",
-          content: result.answer,
-          toolCalls: result.toolCalls,
-          pendingActions: result.pendingActions,
-        },
-      ]);
-      refreshSessions();
+      await editMessageStream(
+        activeSessionId,
+        messageId,
+        trimmed,
+        streamHandlers(() => setIsAsking(false))
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to update message";
-      setMessages((prev) => [...prev, { role: "assistant", content: message, isError: true }]);
-    } finally {
+      appendAssistantTokenAndUpdateTool((m) => ({ ...m, content: message, isError: true, isStreaming: false }));
       setIsAsking(false);
+    }
+  }
+
+  async function handleUpload(file: File) {
+    setIsUploading(true);
+    try {
+      const result = await uploadCv(file);
+      setUploadedTitle(result.title);
+      setSnackbar({ message: `Indexed "${result.title}" — ${result.chunkCount} chunks`, severity: "success" });
+    } catch (err) {
+      setSnackbar({ message: err instanceof Error ? err.message : "Upload failed", severity: "error" });
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -405,7 +461,7 @@ export default function Home() {
                     disabled={isAsking}
                   />
                 ))}
-                {isAsking && (
+                {/* {isAsking && (
                   <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
                     <Avatar sx={{ width: 28, height: 28, bgcolor: tokens.accentDim, color: tokens.accentBright }}>
                       <SmartToyRoundedIcon sx={{ fontSize: 16 }} />
@@ -426,7 +482,34 @@ export default function Home() {
                       ))}
                     </Stack>
                   </Stack>
-                )}
+                )} */}
+                                {/* Once the streaming placeholder message has any content or tool
+                    activity, it speaks for itself - the bouncing dots only cover
+                    the brief gap before the first token/tool call arrives. */}
+                {isAsking &&
+                  !messages[messages.length - 1]?.content &&
+                  !messages[messages.length - 1]?.toolCalls?.length && (
+                    <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+                      <Avatar sx={{ width: 28, height: 28, bgcolor: tokens.accentDim, color: tokens.accentBright }}>
+                        <SmartToyRoundedIcon sx={{ fontSize: 16 }} />
+                      </Avatar>
+                      <Stack direction="row" spacing={0.6}>
+                        {[0, 1, 2].map((d) => (
+                          <Box
+                            key={d}
+                            sx={{
+                              width: 5,
+                              height: 5,
+                              borderRadius: "50%",
+                              bgcolor: tokens.mutedDim,
+                              animation: "bounceDot 1.2s ease-in-out infinite",
+                              animationDelay: `${d * 0.15}s`,
+                            }}
+                          />
+                        ))}
+                      </Stack>
+                    </Stack>
+                  )}
               </Stack>
             )}
             <div ref={scrollAnchorRef} />
@@ -771,7 +854,7 @@ function MessageBubble({
               {message.content}
             </ReactMarkdown>
 
-            {message.toolCalls && message.toolCalls.length > 0 && (
+            {/* {message.toolCalls && message.toolCalls.length > 0 && (
               <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap", mt: 1.5 }}>
                 {message.toolCalls.map((call, j) => (
                   <Tooltip
@@ -790,6 +873,43 @@ function MessageBubble({
                     />
                   </Tooltip>
                 ))}
+              </Stack>
+            )} */}
+
+                        {message.toolCalls && message.toolCalls.length > 0 && (
+              <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap", mt: 1.5 }}>
+                {message.toolCalls.map((call, j) => {
+                  const isRunning = message.isStreaming && call.output === undefined;
+                  return (
+                    <Tooltip
+                      key={j}
+                      title={
+                        isRunning
+                          ? `Running ${call.tool}…`
+                          : typeof call.input === "object"
+                            ? JSON.stringify(call.input)
+                            : String(call.input)
+                      }
+                    >
+                      <Chip
+                        size="small"
+                        icon={
+                          isRunning ? (
+                            <CircularProgress size={11} sx={{ color: tokens.accentBright }} />
+                          ) : (
+                            <BuildRoundedIcon sx={{ fontSize: 13 }} />
+                          )
+                        }
+                        label={call.tool}
+                        sx={{
+                          bgcolor: isRunning ? tokens.accentDim : tokens.panelRaised,
+                          border: `1px solid ${isRunning ? tokens.userBorder : tokens.border}`,
+                          color: isRunning ? tokens.accentBright : tokens.muted,
+                        }}
+                      />
+                    </Tooltip>
+                  );
+                })}
               </Stack>
             )}
 

@@ -17,13 +17,27 @@
   "build": {
     "appId": "com.yourname.personal-assistant-code",
     "productName": "Personal Assistant Code",
-    "directories": { "output": "release", "buildResources": "build" },
-    "files": ["out/**/*"],
-    "mac": { "category": "public.app-category.developer-tools" },
-    "win": { "target": "nsis" },
-    "linux": { "target": "AppImage", "category": "Development" }
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Development"
+    }
   },
   "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
     "@langchain/core": "^0.3.40",
     "@langchain/google-genai": "^0.1.9",
     "@langchain/langgraph": "^0.2.44",
@@ -33,8 +47,6 @@
     "@mui/material": "^9.2.0",
     "dotenv": "^16.4.5",
     "monaco-editor": "^0.56.0",
-    "@emotion/react": "^11.14.0",
-    "@emotion/styled": "^11.14.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -42,7 +54,7 @@
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^5.2.0",
-    "electron": "^43.3.0",
+    "electron": "^43.4.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "react": "^19.0.0",

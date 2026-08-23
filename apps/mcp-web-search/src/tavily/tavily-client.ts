@@ -32,13 +32,21 @@ export async function search(params: {
   maxResults?: number;
   topic?: "general" | "news" | "finance";
   includeAnswer?: boolean;
+  /**
+   * "basic" is a single-pass search and is what the agent should use for
+   * ordinary lookups; "advanced" adds a second crawl/rerank pass that costs
+   * roughly 2x the credits *and* noticeably more latency (often several
+   * extra seconds) - worth it occasionally, not on every web_search call.
+   * Defaults to "basic" so a normal chat lookup doesn't pay that tax.
+   */
+  searchDepth?: "basic" | "advanced";
 }): Promise<SearchResponse> {
   const response = await fetch(`${TAVILY_BASE_URL}/search`, {
     method: "POST",
     headers: commonHeaders(),
     body: JSON.stringify({
       query: params.query,
-      search_depth: "advanced", // "advanced" costs 2 credits/request instead of 1 - basic is enough for chat-agent lookups
+      search_depth: params.searchDepth ?? "basic",
       max_results: params.maxResults ?? 5,
       topic: params.topic ?? "general",
       include_answer: params.includeAnswer ?? true,

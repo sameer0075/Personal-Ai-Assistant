@@ -1,14 +1,6 @@
 import { pipeline, type FeatureExtractionPipeline } from "@xenova/transformers";
 import { env } from "../../config/env.js";
 
-/**
- * Generates sentence embeddings 100% locally via transformers.js (ONNX runtime
- * under the hood) - no external API, no per-token cost, no network call at
- * inference time. Model weights are downloaded once and cached on disk.
- *
- * Xenova/all-MiniLM-L6-v2 -> 384-dim vectors, which must match the `vector(384)`
- * column type in the migration and EMBEDDING_DIMENSIONS in .env.
- */
 class EmbeddingService {
   private pipelinePromise: Promise<FeatureExtractionPipeline> | null = null;
 
@@ -26,19 +18,30 @@ class EmbeddingService {
     return vector;
   }
 
-  /** Embed many strings in one pass (used during CV ingestion). */
+  /**
+   * Embed many strings in one pass (used during CV ingestion, and for
+   * conversation-recall indexing after every chat turn).
+   *
+   * Previously this looped and awaited the extractor once per text, so N
+   * chunks meant N sequential ONNX runs. transformers.js pipelines accept an
+   * array directly and batch the forward pass, which is meaningfully faster
+   * for multi-chunk documents - the difference shows up as ingestion (and
+   * therefore each chat turn's fire-and-forget recall indexing) finishing
+   * faster and freeing up the event loop sooner.
+   */
   async embedBatch(texts: string[]): Promise<number[][]> {
+    if (texts.length === 0) return [];
     const extractor = await this.getPipeline();
-    const results: number[][] = [];
+    const output = await extractor(texts, { pooling: "mean", normalize: true });
 
-    for (const text of texts) {
-      const output = await extractor(text, { pooling: "mean", normalize: true });
-      results.push(Array.from(output.data as Float32Array));
-    }
+    // Batched output is a single tensor of shape [texts.length, dim] -
+    // `tolist()` gives us back one array per input string.
+    return (output.tolist() as number[][]).map((vector) => vector);
+  }
 
-    return results;
+  warmUp(): Promise<FeatureExtractionPipeline> {
+    return this.getPipeline();
   }
 }
 
-// Singleton - the model must only be loaded into memory once per process.
 export const embeddingService = new EmbeddingService();

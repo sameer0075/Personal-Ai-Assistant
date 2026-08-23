@@ -21,11 +21,25 @@ export function registerSearchTools(server: McpServer): void {
           .enum(["general", "news", "finance"])
           .optional()
           .describe("Narrows the search - use 'news' for current events, 'finance' for markets/companies"),
+        deepSearch: z
+          .boolean()
+          .optional()
+          .describe(
+            "Set true only when a quick search's snippets are clearly insufficient (e.g. a hard research " +
+              "question needing multiple corroborating sources) - it takes noticeably longer. Leave false/omitted " +
+              "for ordinary lookups."
+          ),
       },
     },
-    async ({ query, maxResults, topic }) => {
+    async ({ query, maxResults, topic, deepSearch }) => {
       try {
-        const response = await tavily.search({ query, maxResults, topic, includeAnswer: true });
+        const response = await tavily.search({
+          query,
+          maxResults,
+          topic,
+          includeAnswer: true,
+          searchDepth: deepSearch ? "advanced" : "basic",
+        });
         return jsonResult(response);
       } catch (err) {
         return errorResult(err);
