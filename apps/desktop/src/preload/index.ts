@@ -22,6 +22,16 @@ export interface ToolConfirmationRequest {
   input: unknown;
 }
 
+export interface PendingFileChange {
+  id: string;
+  projectId: string;
+  tool: "write_file" | "edit_file" | "delete_file" | "create_directory";
+  path: string;
+  before: string | null;
+  after: string | null;
+  summary: string;
+}
+
 const api = {
   openFolder: (): Promise<ProjectInfo | null> => ipcRenderer.invoke("project:open-folder"),
   listProjects: (): Promise<ProjectInfo[]> => ipcRenderer.invoke("project:list"),
@@ -61,6 +71,15 @@ const api = {
 
   respondToToolConfirmation: (requestId: string, approved: boolean): Promise<void> =>
     ipcRenderer.invoke("agent:confirm-tool", requestId, approved),
+
+  /** VS Code-style diff modal for file-mutating tool calls (write_file/edit_file/delete_file/create_directory). */
+  onPendingFileChange: (callback: (change: PendingFileChange) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, change: PendingFileChange) => callback(change);
+    ipcRenderer.on("agent:pending-change", listener);
+    return () => ipcRenderer.removeListener("agent:pending-change", listener);
+  },
+  respondToPendingFileChange: (id: string, approved: boolean): void =>
+    ipcRenderer.send("agent:respond-to-pending-change", id, approved),
 };
 
 contextBridge.exposeInMainWorld("api", api);

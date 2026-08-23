@@ -248,38 +248,77 @@ function objectToZod(schema) {
 function mcpInputSchemaToZod(inputSchema) {
   return objectToZod(inputSchema);
 }
-const pending = /* @__PURE__ */ new Map();
-function requestToolConfirmation(projectId, tool2, input) {
-  const win = getMainWindow();
-  if (!win) return Promise.resolve(false);
-  const requestId = randomUUID();
+const pendingResolvers = /* @__PURE__ */ new Map();
+function requestApproval(change) {
+  const id = randomUUID();
   return new Promise((resolve) => {
-    pending.set(requestId, { projectId, resolve });
-    win.webContents.send("agent:tool-confirmation-request", { requestId, projectId, tool: tool2, input });
+    pendingResolvers.set(id, { projectId: change.projectId, resolve });
+    getMainWindow()?.webContents.send("agent:pending-change", { ...change, id });
   });
 }
-function resolveToolConfirmation(requestId, approved) {
-  const resolver = pending.get(requestId);
+function resolvePendingChange(id, approved) {
+  const resolver = pendingResolvers.get(id);
   if (!resolver) return;
-  pending.delete(requestId);
+  pendingResolvers.delete(id);
   resolver.resolve(approved);
 }
-function cancelPendingConfirmationsForProject(projectId) {
-  for (const [requestId, resolver] of pending) {
+function cancelPendingChangesForProject(projectId) {
+  for (const [id, resolver] of pendingResolvers) {
     if (resolver.projectId === projectId) {
-      pending.delete(requestId);
+      pendingResolvers.delete(id);
       resolver.resolve(false);
     }
   }
 }
 const FILE_MUTATING_TOOLS = /* @__PURE__ */ new Set(["write_file", "edit_file", "delete_file", "create_directory"]);
+const SUMMARY_BY_TOOL = {
+  write_file: (fileExists) => fileExists ? "Overwrite file" : "Create file",
+  edit_file: () => "Edit file",
+  delete_file: () => "Delete",
+  create_directory: () => "Create directory"
+};
+async function readCurrentContent(projectId, relativePath) {
+  try {
+    return await promises.readFile(resolveUiSafePath(projectId, relativePath), "utf-8");
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw err;
+  }
+}
+function previewEdit(before, oldStr, newStr) {
+  const occurrences = before.split(oldStr).length - 1;
+  if (occurrences !== 1) return null;
+  return before.replace(oldStr, newStr);
+}
+async function requestFileChangeApproval(projectId, toolName, input) {
+  const path2 = typeof input.path === "string" ? input.path : "unknown";
+  const before = await readCurrentContent(projectId, path2);
+  let after = null;
+  if (toolName === "write_file" && typeof input.content === "string") {
+    after = input.content;
+  } else if (toolName === "edit_file" && before !== null && typeof input.oldStr === "string" && typeof input.newStr === "string") {
+    after = previewEdit(before, input.oldStr, input.newStr);
+  }
+  return requestApproval({
+    projectId,
+    tool: toolName,
+    path: path2,
+    before,
+    after,
+    summary: SUMMARY_BY_TOOL[toolName](before !== null)
+  });
+}
 async function loadMcpToolsForProject(projectId) {
   const mcpTools = await listMcpToolsForProject(projectId);
   return mcpTools.map(
     (mcpTool) => tool(
       async (input) => {
         if (FILE_MUTATING_TOOLS.has(mcpTool.name)) {
-          const approved = await requestToolConfirmation(projectId, mcpTool.name, input);
+          const approved = await requestFileChangeApproval(
+            projectId,
+            mcpTool.name,
+            input ?? {}
+          );
           if (!approved) {
             return `The user declined this ${mcpTool.name} action. Do not retry it without being asked again. Tell the user you were blocked and ask how they'd like to proceed.`;
           }
@@ -396,6 +435,21 @@ async function resetConversationForProject(projectId) {
   state.displayMessages = [];
   await clearChatHistory(state.projectRoot);
 }
+const pending = /* @__PURE__ */ new Map();
+function resolveToolConfirmation(requestId, approved) {
+  const resolver = pending.get(requestId);
+  if (!resolver) return;
+  pending.delete(requestId);
+  resolver.resolve(approved);
+}
+function cancelPendingConfirmationsForProject(projectId) {
+  for (const [requestId, resolver] of pending) {
+    if (resolver.projectId === projectId) {
+      pending.delete(requestId);
+      resolver.resolve(false);
+    }
+  }
+}
 function registerProjectIpc() {
   ipcMain.handle("project:open-folder", async () => {
     const win = getMainWindow();
@@ -411,6 +465,7 @@ function registerProjectIpc() {
   });
   ipcMain.handle("project:close", async (_event, projectId) => {
     cancelPendingConfirmationsForProject(projectId);
+    cancelPendingChangesForProject(projectId);
     await disconnectProjectFilesystem(projectId);
     disposeCodingAgentForProject(projectId);
     removeProject(projectId);
@@ -445,13 +500,6 @@ function notifyOfFileChanges(projectId, result) {
   if (changedPaths.length) {
     win.webContents.send("fs:external-change", projectId, changedPaths);
   }
-}
-const pendingResolvers = /* @__PURE__ */ new Map();
-function resolvePendingChange(id, approved) {
-  const resolve = pendingResolvers.get(id);
-  if (!resolve) return;
-  pendingResolvers.delete(id);
-  resolve(approved);
 }
 function registerApprovalIpc() {
   ipcMain.on("agent:respond-to-pending-change", (_event, id, approved) => {

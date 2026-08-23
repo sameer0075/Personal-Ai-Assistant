@@ -5,6 +5,7 @@ export type FileMutatingTool = "write_file" | "edit_file" | "delete_file" | "cre
 
 export interface PendingFileChange {
   id: string;
+  projectId: string;
   tool: FileMutatingTool;
   path: string;
   /** Current file content, or null if the file doesn't exist yet / isn't diffable (e.g. create_directory). */
@@ -14,7 +15,12 @@ export interface PendingFileChange {
   summary: string;
 }
 
-const pendingResolvers = new Map<string, (approved: boolean) => void>();
+interface Resolver {
+  projectId: string;
+  resolve: (approved: boolean) => void;
+}
+
+const pendingResolvers = new Map<string, Resolver>();
 
 /**
  * Sends a proposed change to the renderer and returns a promise that only
@@ -26,14 +32,25 @@ export function requestApproval(change: Omit<PendingFileChange, "id">): Promise<
   const id = randomUUID();
 
   return new Promise((resolve) => {
-    pendingResolvers.set(id, resolve);
+    pendingResolvers.set(id, { projectId: change.projectId, resolve });
     getMainWindow()?.webContents.send("agent:pending-change", { ...change, id });
   });
 }
 
 export function resolvePendingChange(id: string, approved: boolean): void {
-  const resolve = pendingResolvers.get(id);
-  if (!resolve) return; // already resolved, or a stale/unknown id - ignore rather than throw
+  const resolver = pendingResolvers.get(id);
+  if (!resolver) return; // already resolved, or a stale/unknown id - ignore rather than throw
   pendingResolvers.delete(id);
-  resolve(approved);
+  resolver.resolve(approved);
+}
+
+/** Closing a project shouldn't leave a tool call hanging forever waiting on
+ * an approval the user will never see again - treat it as declined. */
+export function cancelPendingChangesForProject(projectId: string): void {
+  for (const [id, resolver] of pendingResolvers) {
+    if (resolver.projectId === projectId) {
+      pendingResolvers.delete(id);
+      resolver.resolve(false);
+    }
+  }
 }

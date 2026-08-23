@@ -11,6 +11,7 @@ import FileTree from "./components/FileTree";
 import EditorPane, { type OpenTab } from "./components/EditorPane";
 import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import ProjectSwitcher from "./components/ProjectSwitcher";
+import PendingChangeDialog, { type PendingFileChange } from "./components/PendingChangeDialog";
 
 import { tokens } from "./theme/theme";
 
@@ -38,6 +39,21 @@ export default function App() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [uiByProject, setUiByProject] = useState<Map<string, ProjectUiState>>(new Map());
   const [notice, setNotice] = useState<{ message: string; severity: "success" | "error" } | null>(null);
+  // Every write_file/edit_file/delete_file/create_directory call the agent
+  // makes waits here for a decision - queued FIFO in case several land
+  // before the user gets to them (e.g. edits across multiple files in one turn).
+  const [pendingChanges, setPendingChanges] = useState<PendingFileChange[]>([]);
+
+  useEffect(() => {
+    return window.api.onPendingFileChange((change) => {
+      setPendingChanges((prev) => [...prev, change]);
+    });
+  }, []);
+
+  function respondToPendingChange(id: string, approved: boolean) {
+    window.api.respondToPendingFileChange(id, approved);
+    setPendingChanges((prev) => prev.filter((c) => c.id !== id));
+  }
 
   const activeUi = activeProjectId ? uiByProject.get(activeProjectId) ?? emptyUiState() : null;
 
@@ -244,6 +260,19 @@ export default function App() {
           </Alert>
         ) : undefined}
       </Snackbar>
+
+      {(() => {
+        const projectChanges = pendingChanges.filter((c) => c.projectId === activeProjectId);
+        const [current, ...rest] = projectChanges;
+        if (!current) return null;
+        return (
+          <PendingChangeDialog
+            change={current}
+            queuedCount={rest.length}
+            onRespond={(approved) => respondToPendingChange(current.id, approved)}
+          />
+        );
+      })()}
     </Box>
   );
 }

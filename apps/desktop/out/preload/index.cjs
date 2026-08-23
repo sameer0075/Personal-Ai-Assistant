@@ -23,6 +23,13 @@ const api = {
     electron.ipcRenderer.on("agent:tool-confirmation-request", listener);
     return () => electron.ipcRenderer.removeListener("agent:tool-confirmation-request", listener);
   },
-  respondToToolConfirmation: (requestId, approved) => electron.ipcRenderer.invoke("agent:confirm-tool", requestId, approved)
+  respondToToolConfirmation: (requestId, approved) => electron.ipcRenderer.invoke("agent:confirm-tool", requestId, approved),
+  /** VS Code-style diff modal for file-mutating tool calls (write_file/edit_file/delete_file/create_directory). */
+  onPendingFileChange: (callback) => {
+    const listener = (_event, change) => callback(change);
+    electron.ipcRenderer.on("agent:pending-change", listener);
+    return () => electron.ipcRenderer.removeListener("agent:pending-change", listener);
+  },
+  respondToPendingFileChange: (id, approved) => electron.ipcRenderer.send("agent:respond-to-pending-change", id, approved)
 };
 electron.contextBridge.exposeInMainWorld("api", api);

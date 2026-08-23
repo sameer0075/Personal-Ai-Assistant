@@ -14,6 +14,7 @@ import { tokens } from "../theme/theme";
 
 export interface PendingFileChange {
   id: string;
+  projectId: string;
   tool: "write_file" | "edit_file" | "delete_file" | "create_directory";
   path: string;
   before: string | null;

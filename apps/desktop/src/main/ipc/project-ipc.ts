@@ -11,6 +11,7 @@ import { getMainWindow } from "../state/window-state.js";
 import { connectProjectFilesystem, disconnectProjectFilesystem } from "../mcp/mcp-client.service.js";
 import { buildCodingAgentForProject, disposeCodingAgentForProject } from "../agent/coding-agent.graph.js";
 import { cancelPendingConfirmationsForProject } from "../agent/tool-confirmation.service.js";
+import { cancelPendingChangesForProject } from "../agent/approval-broker.js";
 
 export function registerProjectIpc(): void {
   ipcMain.handle("project:open-folder", async (): Promise<ProjectInfo | null> => {
@@ -33,6 +34,7 @@ export function registerProjectIpc(): void {
 
   ipcMain.handle("project:close", async (_event, projectId: string): Promise<void> => {
     cancelPendingConfirmationsForProject(projectId);
+    cancelPendingChangesForProject(projectId);
     await disconnectProjectFilesystem(projectId);
     disposeCodingAgentForProject(projectId);
     removeProject(projectId);
