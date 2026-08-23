@@ -180,13 +180,13 @@ export default function Sidebar({
           <Stack sx={{ alignItems: "center", py: 2 }}>
             <CircularProgress size={16} sx={{ color: tokens.mutedDim }} />
           </Stack>
-        ) : sessions.length === 0 ? (
+        ) : sessions?.length === 0 ? (
           <Typography sx={{ fontSize: 12.5, color: tokens.mutedDim, px: 1.25, py: 1 }}>
             No chats yet — start one above.
           </Typography>
         ) : (
           <Stack spacing={0.5}>
-            {sessions.map((session) => {
+            {sessions?.map((session) => {
               const active = session.id === activeSessionId;
               return (
                 <Stack
