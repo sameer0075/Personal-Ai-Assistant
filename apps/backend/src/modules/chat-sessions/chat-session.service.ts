@@ -1,6 +1,7 @@
 import { chatSessionRepository } from "./chat-session.repository.js";
 import { ingestText } from "../rag/ingest-text.service.js";
-import type { AssistantAnswer, ChatSession, ChatMessageRecord } from "../../types/index.js";
+import { formatContentForAgent } from "./attachment-format.js";
+import type { AssistantAnswer, ChatSession, ChatMessageRecord, ChatAttachment } from "../../types/index.js";
 
 export const HISTORY_WINDOW = 10;
 
@@ -24,11 +25,18 @@ export async function getOrCreateSession(sessionId?: string): Promise<ChatSessio
   return chatSessionRepository.createSession();
 }
 
+/**
+ * Builds the agent's view of recent history. A message's `content` column is
+ * always the user's raw typed text (used for display/editing); here it's
+ * merged with any attached file text via formatContentForAgent, so a file
+ * attached a few turns back is still visible to the agent on follow-up
+ * questions ("what does page 2 say?") without re-uploading it.
+ */
 export async function getHistoryForAgent(
   sessionId: string
 ): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
   const rows = await chatSessionRepository.getRecentMessages(sessionId, HISTORY_WINDOW);
-  return rows.map((r) => ({ role: r.role, content: r.content }));
+  return rows.map((r) => ({ role: r.role, content: formatContentForAgent(r.content, r.attachments) }));
 }
 
 /**
@@ -39,9 +47,15 @@ export async function getHistoryForAgent(
 export async function recordTurn(
   sessionId: string,
   question: string,
-  result: AssistantAnswer
+  result: AssistantAnswer,
+  attachments?: ChatAttachment[]
 ): Promise<{ userMessageId: string; assistantMessageId: string }> {
-  const userMessage = await chatSessionRepository.appendMessage({ sessionId, role: "user", content: question });
+  const userMessage = await chatSessionRepository.appendMessage({
+    sessionId,
+    role: "user",
+    content: question,
+    attachments,
+  });
   const assistantMessage = await chatSessionRepository.appendMessage({
     sessionId,
     role: "assistant",

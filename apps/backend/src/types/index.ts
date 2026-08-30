@@ -24,7 +24,23 @@ export interface ChatMessageRecord {
   content: string;
   toolCalls: ToolCallTrace[] | null;
   pendingActionIds: string[] | null;
+  attachments: ChatAttachment[] | null;
   createdAt: string;
+}
+
+/**
+ * A file attached directly to a chat message - separate from the RAG
+ * document pipeline (DocumentRecord/DocumentChunkRecord below). This is
+ * scoped to one conversation: its extracted text rides along in the message
+ * history so the agent can answer questions about it, but it is never
+ * embedded or searched across the wider knowledge base.
+ */
+export interface ChatAttachment {
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  text: string;
+  truncated: boolean;
 }
 
 export interface LinkedinActionPayload {

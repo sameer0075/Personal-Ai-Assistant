@@ -26,6 +26,7 @@ sessionsRoutes.get("/:id/messages", async (req, res) => {
           content: m.content,
           toolCalls: m.toolCalls ?? [],
           pendingActions,
+          attachments: m.attachments ?? [],
         };
       })
     );

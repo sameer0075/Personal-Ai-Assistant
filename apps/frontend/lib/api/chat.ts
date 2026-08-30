@@ -1,10 +1,23 @@
-import { API_BASE_URL, apiJson } from "./client";
+import { API_BASE_URL, apiFetch, apiJson } from "./client";
 import type { PendingAction } from "./actions";
 
 export interface ToolCallTrace {
   tool: string;
   input: unknown;
   output?: string;
+}
+
+/**
+ * A file attached directly to a chat message. Separate from the persistent
+ * document library (see ./documents' uploadCv) - this rides along with one
+ * message so the agent can answer questions about it, but it's never pushed
+ * into the RAG index or made searchable from other chats.
+ */
+export interface ChatAttachment {
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  truncated: boolean;
 }
 
 export interface AssistantAnswer {
@@ -16,7 +29,30 @@ export interface AssistantAnswer {
   pendingActions: PendingAction[];
 }
 
-export function askQuestion(question: string, sessionId?: string): Promise<AssistantAnswer> {
+/** Builds either a JSON body or (when a file is attached) multipart form data for a chat request. */
+function buildChatBody(fields: Record<string, string | undefined>, file?: File): { body: BodyInit; headers?: Record<string, string> } {
+  if (file) {
+    const formData = new FormData();
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== undefined) formData.append(key, value);
+    }
+    formData.append("file", file);
+    return { body: formData }; // no Content-Type - fetch sets the multipart boundary itself
+  }
+  return { body: JSON.stringify(fields), headers: { "Content-Type": "application/json" } };
+}
+
+/**
+ * Sends a chat turn. Passing `file` attaches it to THIS message only - the
+ * agent reads its text directly to answer questions about it, but it is
+ * never written to the persistent document library (see uploadCv in
+ * ./documents for that, a separate, explicit action).
+ */
+export function askQuestion(question: string, sessionId?: string, file?: File): Promise<AssistantAnswer> {
+  if (file) {
+    const { body } = buildChatBody({ question, sessionId }, file);
+    return apiFetch<AssistantAnswer>("/chat", { method: "POST", body });
+  }
   return apiJson<AssistantAnswer>("/chat", "POST", sessionId ? { question, sessionId } : { question });
 }
 
@@ -91,11 +127,19 @@ async function consumeChatStream(res: Response, handlers: ChatStreamHandlers): P
   }
 }
 
-async function postStream(path: string, body: unknown, handlers: ChatStreamHandlers, signal?: AbortSignal) {
+async function postStream(
+  path: string,
+  fields: Record<string, string | undefined>,
+  handlers: ChatStreamHandlers,
+  signal?: AbortSignal,
+  file?: File
+) {
+  const { body, headers } = buildChatBody(fields, file);
+
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    headers,
+    body,
     signal,
   });
 
@@ -107,13 +151,18 @@ async function postStream(path: string, body: unknown, handlers: ChatStreamHandl
   await consumeChatStream(res, handlers);
 }
 
+/**
+ * Streaming chat turn. Passing `file` attaches it to THIS message only - see
+ * the non-streaming askQuestion above for the same note on scope.
+ */
 export function askQuestionStream(
   question: string,
   sessionId: string | undefined,
   handlers: ChatStreamHandlers,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  file?: File
 ): Promise<void> {
-  return postStream("/chat/stream", sessionId ? { question, sessionId } : { question }, handlers, signal);
+  return postStream("/chat/stream", { question, sessionId }, handlers, signal, file);
 }
 
 export function editMessageStream(

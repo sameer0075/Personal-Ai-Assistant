@@ -1,5 +1,5 @@
 import { pool } from "../../config/database.js";
-import type { ChatSession, ChatMessageRecord, ToolCallTrace } from "../../types/index.js";
+import type { ChatSession, ChatMessageRecord, ToolCallTrace, ChatAttachment } from "../../types/index.js";
 
 export const chatSessionRepository = {
   async createSession(title: string = "New Chat"): Promise<ChatSession> {
@@ -51,19 +51,21 @@ export const chatSessionRepository = {
     content: string;
     toolCalls?: ToolCallTrace[];
     pendingActionIds?: string[];
+    attachments?: ChatAttachment[];
   }): Promise<ChatMessageRecord> {
     const { rows } = await pool.query<ChatMessageRecord>(
-      `INSERT INTO chat_messages (session_id, role, content, tool_calls, pending_action_ids)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO chat_messages (session_id, role, content, tool_calls, pending_action_ids, attachments)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, session_id AS "sessionId", role, content,
                  tool_calls AS "toolCalls", pending_action_ids AS "pendingActionIds",
-                 created_at AS "createdAt"`,
+                 attachments, created_at AS "createdAt"`,
       [
         params.sessionId,
         params.role,
         params.content,
         params.toolCalls ? JSON.stringify(params.toolCalls) : null,
         params.pendingActionIds ?? null,
+        params.attachments ? JSON.stringify(params.attachments) : null,
       ]
     );
     await this.touchSession(params.sessionId);
@@ -75,7 +77,7 @@ export const chatSessionRepository = {
     const { rows } = await pool.query<ChatMessageRecord>(
       `SELECT id, session_id AS "sessionId", role, content,
               tool_calls AS "toolCalls", pending_action_ids AS "pendingActionIds",
-              created_at AS "createdAt"
+              attachments, created_at AS "createdAt"
        FROM chat_messages WHERE id = $1`,
       [id]
     );
@@ -99,7 +101,7 @@ export const chatSessionRepository = {
     const { rows } = await pool.query<ChatMessageRecord>(
       `SELECT id, session_id AS "sessionId", role, content,
               tool_calls AS "toolCalls", pending_action_ids AS "pendingActionIds",
-              created_at AS "createdAt"
+              attachments, created_at AS "createdAt"
        FROM (
          SELECT * FROM chat_messages WHERE session_id = $1
          ORDER BY created_at DESC LIMIT $2
@@ -114,7 +116,7 @@ export const chatSessionRepository = {
     const { rows } = await pool.query<ChatMessageRecord>(
       `SELECT id, session_id AS "sessionId", role, content,
               tool_calls AS "toolCalls", pending_action_ids AS "pendingActionIds",
-              created_at AS "createdAt"
+              attachments, created_at AS "createdAt"
        FROM chat_messages WHERE session_id = $1
        ORDER BY created_at ASC`,
       [sessionId]

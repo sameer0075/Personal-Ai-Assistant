@@ -21,6 +21,7 @@ import Tooltip from "@mui/material/Tooltip";
 import Alert from "@mui/material/Alert";
 import Snackbar from "@mui/material/Snackbar";
 import UploadFileRoundedIcon from "@mui/icons-material/UploadFileRounded";
+import AttachFileRoundedIcon from "@mui/icons-material/AttachFileRounded";
 import ArrowUpwardRoundedIcon from "@mui/icons-material/ArrowUpwardRounded";
 import MicNoneRoundedIcon from "@mui/icons-material/MicNoneRounded";
 import SmartToyRoundedIcon from "@mui/icons-material/SmartToyRounded";
@@ -36,7 +37,7 @@ import MailOutlineRoundedIcon from "@mui/icons-material/MailOutlineRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
-import { askQuestionStream, editMessageStream, AssistantAnswer, ToolCallTrace } from "@/lib/api/chat";
+import { askQuestionStream, editMessageStream, AssistantAnswer, ToolCallTrace, type ChatAttachment } from "@/lib/api/chat";
 
 import { tokens } from "@/lib/theme";
 import { uploadCv } from "@/lib/api";
@@ -52,11 +53,14 @@ interface Message {
   content: string;
   toolCalls?: ToolCallTrace[];
   pendingActions?: PendingAction[];
+  attachments?: ChatAttachment[];
   isError?: boolean;
   isStreaming?: boolean;
 }
 
 const MAX_CHARS = 10000;
+// Kept in sync with the backend's SupportedFileExt (apps/backend/src/modules/parsing/file-parser.ts).
+const ATTACHMENT_ACCEPT = ".pdf,.docx,.txt";
 
 const SUGGESTIONS = [
   {
@@ -76,6 +80,13 @@ export default function Home() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedTitle, setUploadedTitle] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<{ message: string; severity: "success" | "error" } | null>(null);
+
+  // Chat attachment: a file the user attaches to THIS message to ask about it directly.
+  // Deliberately separate from fileInputRef/handleUpload below, which push a file into the
+  // persistent RAG knowledge base via /documents/upload. This one just rides along with
+  // the chat turn - see askQuestionStream(..., file) in lib/api/chat.ts.
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const chatAttachmentInputRef = useRef<HTMLInputElement>(null);
 
   const [reviewAction, setReviewAction] = useState<PendingAction | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -171,24 +182,45 @@ export default function Home() {
     };
   }
 
+  function openChatAttachmentPicker() {
+    chatAttachmentInputRef.current?.click();
+  }
+
+  function handleChatAttachmentSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) setAttachedFile(file);
+    e.target.value = "";
+  }
+
   async function handleAsk(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = question.trim();
-    if (!trimmed || isAsking) return;
+    if ((!trimmed && !attachedFile) || isAsking) return;
+
+    const fileToSend = attachedFile ?? undefined;
 
     setMessages((prev) => [
       ...prev,
-      { role: "user", content: trimmed },
+      {
+        role: "user",
+        content: trimmed,
+        attachments: fileToSend
+          ? [{ filename: fileToSend.name, mimeType: fileToSend.type, sizeBytes: fileToSend.size, truncated: false }]
+          : undefined,
+      },
       { role: "assistant", content: "", toolCalls: [], isStreaming: true },
     ]);
     setQuestion("");
+    setAttachedFile(null);
     setIsAsking(true);
 
     try {
       await askQuestionStream(
         trimmed,
         activeSessionId ?? undefined,
-        streamHandlers(() => setIsAsking(false))
+        streamHandlers(() => setIsAsking(false)),
+        undefined,
+        fileToSend
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Something went wrong";
@@ -461,29 +493,7 @@ export default function Home() {
                     disabled={isAsking}
                   />
                 ))}
-                {/* {isAsking && (
-                  <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
-                    <Avatar sx={{ width: 28, height: 28, bgcolor: tokens.accentDim, color: tokens.accentBright }}>
-                      <SmartToyRoundedIcon sx={{ fontSize: 16 }} />
-                    </Avatar>
-                    <Stack direction="row" spacing={0.6}>
-                      {[0, 1, 2].map((d) => (
-                        <Box
-                          key={d}
-                          sx={{
-                            width: 5,
-                            height: 5,
-                            borderRadius: "50%",
-                            bgcolor: tokens.mutedDim,
-                            animation: "bounceDot 1.2s ease-in-out infinite",
-                            animationDelay: `${d * 0.15}s`,
-                          }}
-                        />
-                      ))}
-                    </Stack>
-                  </Stack>
-                )} */}
-                                {/* Once the streaming placeholder message has any content or tool
+                {/* Once the streaming placeholder message has any content or tool
                     activity, it speaks for itself - the bouncing dots only cover
                     the brief gap before the first token/tool call arrives. */}
                 {isAsking &&
@@ -537,6 +547,31 @@ export default function Home() {
                 },
               }}
             >
+              {attachedFile && (
+                <Chip
+                  icon={<DescriptionRoundedIcon sx={{ fontSize: 15 }} />}
+                  label={attachedFile.name}
+                  size="small"
+                  onDelete={() => setAttachedFile(null)}
+                  deleteIcon={<CloseRoundedIcon sx={{ fontSize: 14 }} />}
+                  sx={{
+                    mb: 1,
+                    maxWidth: "100%",
+                    bgcolor: tokens.panelRaised,
+                    border: `1px solid ${tokens.border}`,
+                    color: tokens.text,
+                  }}
+                />
+              )}
+
+              <input
+                ref={chatAttachmentInputRef}
+                type="file"
+                accept={ATTACHMENT_ACCEPT}
+                hidden
+                onChange={handleChatAttachmentSelected}
+              />
+
               <TextField
                 inputRef={inputRef}
                 fullWidth
@@ -562,15 +597,15 @@ export default function Home() {
                       </IconButton>
                     </span>
                   </Tooltip>
-                  <Tooltip title="Attach a document to index">
+                  <Tooltip title="Attach a file to ask about, just for this chat">
                     <span>
                       <IconButton
                         size="small"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={isUploading}
+                        onClick={openChatAttachmentPicker}
+                        disabled={isAsking}
                         sx={{ color: tokens.muted }}
                       >
-                        <UploadFileRoundedIcon sx={{ fontSize: 18 }} />
+                        <AttachFileRoundedIcon sx={{ fontSize: 18 }} />
                       </IconButton>
                     </span>
                   </Tooltip>
@@ -583,7 +618,7 @@ export default function Home() {
                   <IconButton
                     type="submit"
                     size="small"
-                    disabled={isAsking || !question.trim()}
+                    disabled={isAsking || (!question.trim() && !attachedFile)}
                     sx={{
                       width: 32,
                       height: 32,
@@ -711,6 +746,23 @@ function MessageBubble({
               bgcolor: message.isError ? tokens.dangerDim : isUser ? tokens.userTint : tokens.panel,
             }}
           >
+            {message.attachments && message.attachments.length > 0 && (
+              <Stack direction="row" spacing={0.75} sx={{ flexWrap: "wrap", mb: message.content ? 1.25 : 0 }}>
+                {message.attachments.map((a, i) => (
+                  <Chip
+                    key={i}
+                    icon={<DescriptionRoundedIcon sx={{ fontSize: 14 }} />}
+                    label={a.filename}
+                    size="small"
+                    sx={{
+                      bgcolor: tokens.panelRaised,
+                      border: `1px solid ${tokens.border}`,
+                      color: tokens.muted,
+                    }}
+                  />
+                ))}
+              </Stack>
+            )}
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeHighlight]}
@@ -854,29 +906,7 @@ function MessageBubble({
               {message.content}
             </ReactMarkdown>
 
-            {/* {message.toolCalls && message.toolCalls.length > 0 && (
-              <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap", mt: 1.5 }}>
-                {message.toolCalls.map((call, j) => (
-                  <Tooltip
-                    key={j}
-                    title={typeof call.input === "object" ? JSON.stringify(call.input) : String(call.input)}
-                  >
-                    <Chip
-                      size="small"
-                      icon={<BuildRoundedIcon sx={{ fontSize: 13 }} />}
-                      label={call.tool}
-                      sx={{
-                        bgcolor: tokens.panelRaised,
-                        border: `1px solid ${tokens.border}`,
-                        color: tokens.muted,
-                      }}
-                    />
-                  </Tooltip>
-                ))}
-              </Stack>
-            )} */}
-
-                        {message.toolCalls && message.toolCalls.length > 0 && (
+            {message.toolCalls && message.toolCalls.length > 0 && (
               <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap", mt: 1.5 }}>
                 {message.toolCalls.map((call, j) => {
                   const isRunning = message.isStreaming && call.output === undefined;

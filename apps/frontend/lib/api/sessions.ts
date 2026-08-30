@@ -1,5 +1,5 @@
 import { apiFetch, apiJson } from "./client";
-import type { ToolCallTrace } from "./chat";
+import type { ToolCallTrace, ChatAttachment } from "./chat";
 import type { PendingAction } from "./actions";
 
 export interface ChatSession {
@@ -15,6 +15,7 @@ export interface StoredMessage {
   content: string;
   toolCalls: ToolCallTrace[];
   pendingActions: PendingAction[];
+  attachments: ChatAttachment[];
 }
 
 export function listSessions(): Promise<ChatSession[]> {
