@@ -40,12 +40,13 @@ import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
 import { askQuestionStream, editMessageStream, AssistantAnswer, ToolCallTrace, type ChatAttachment } from "@/lib/api/chat";
 
 import { tokens } from "@/lib/theme";
-import { uploadCv } from "@/lib/api";
+import { uploadCv } from "@/lib/api/documents";
 import { askQuestion, editMessage } from "@/lib/api/chat";
 import { PendingAction } from "@/lib/api/actions";
 import { listSessions, getSessionMessages, deleteSession, type ChatSession } from "@/lib/api/sessions";
 import Sidebar from "@/components/Sidebar";
 import ActionApprovalModal from "@/components/ActionApprovalModal";
+import RequireAuth from "@/lib/auth/RequireAuth";
 
 interface Message {
   id?: string; // present once persisted - required to edit a message
@@ -74,6 +75,14 @@ const SUGGESTIONS = [
 ];
 
 export default function Home() {
+  return (
+    <RequireAuth>
+      <HomeContent />
+    </RequireAuth>
+  );
+}
+
+function HomeContent() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [question, setQuestion] = useState("");
   const [isAsking, setIsAsking] = useState(false);

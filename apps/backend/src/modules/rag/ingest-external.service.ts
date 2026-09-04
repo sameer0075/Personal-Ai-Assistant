@@ -36,16 +36,14 @@ interface LinkedinPostSummary {
   publishedAt: string;
 }
 
-/**
- * Pulls recent Gmail messages (via the MCP server) and indexes any not
- * already in the vector store, so the chat agent's `search_knowledge_base`
- * tool can recall them later. Safe to call repeatedly (e.g. on a schedule) -
- * already-ingested messages are skipped by `metadata.externalId`.
- */
-export async function syncGmailToRag(params: { query?: string; maxResults?: number } = {}): Promise<SyncSummary> {
+export async function syncGmailToRag(
+  userId: string,
+  params: { query?: string; maxResults?: number } = {}
+): Promise<SyncSummary> {
   const listJson = await callMcpTool("gmail_list_messages", {
     query: params.query,
     maxResults: params.maxResults ?? 20,
+    userId
   });
   const messages: GmailMessageSummary[] = JSON.parse(listJson);
 
@@ -53,16 +51,17 @@ export async function syncGmailToRag(params: { query?: string; maxResults?: numb
   let skipped = 0;
 
   for (const message of messages) {
-    const existing = await documentRepository.findByExternalId("email", message.id);
+    const existing = await documentRepository.findByExternalId(userId, "email", message.id);
     if (existing) {
       skipped++;
       continue;
     }
 
-    const fullJson = await callMcpTool("gmail_get_message", { messageId: message.id });
+    const fullJson = await callMcpTool("gmail_get_message", { messageId: message.id, userId });
     const full: GmailMessageFull = JSON.parse(fullJson);
 
     await ingestText({
+      userId,
       title: full.subject || "(no subject)",
       text: [`Subject: ${full.subject}`, `From: ${full.from}`, `To: ${full.to}`, `Date: ${full.date}`, "", full.body].join(
         "\n"
@@ -76,17 +75,15 @@ export async function syncGmailToRag(params: { query?: string; maxResults?: numb
   return { found: messages.length, ingested, skipped };
 }
 
-/**
- * Pulls upcoming Calendar events (via the MCP server) and indexes any not
- * already in the vector store, same dedup strategy as syncGmailToRag.
- */
 export async function syncCalendarToRag(
+  userId: string,
   params: { timeMin?: string; timeMax?: string; maxResults?: number } = {}
 ): Promise<SyncSummary> {
   const listJson = await callMcpTool("calendar_list_events", {
     timeMin: params.timeMin,
     timeMax: params.timeMax,
     maxResults: params.maxResults ?? 25,
+    userId
   });
   const events: CalendarEventSummary[] = JSON.parse(listJson);
 
@@ -94,13 +91,14 @@ export async function syncCalendarToRag(
   let skipped = 0;
 
   for (const event of events) {
-    const existing = await documentRepository.findByExternalId("calendar", event.id);
+    const existing = await documentRepository.findByExternalId(userId, "calendar", event.id);
     if (existing) {
       skipped++;
       continue;
     }
 
     await ingestText({
+      userId,
       title: event.summary || "(untitled event)",
       text: [
         `Event: ${event.summary}`,
@@ -120,28 +118,22 @@ export async function syncCalendarToRag(
   return { found: events.length, ingested, skipped };
 }
 
-/**
- * Pulls the assistant's own record of recently-published LinkedIn posts (see
- * linkedin_list_recent_posts / the linkedin_posts table - LinkedIn's API
- * won't give this back to us) and indexes any not already in the vector
- * store. This is what lets the agent check its own past posts for tone/topic
- * consistency before drafting new ones, via search_knowledge_base.
- */
-export async function syncLinkedinToRag(params: { maxResults?: number } = {}): Promise<SyncSummary> {
-  const listJson = await callMcpTool("linkedin_list_recent_posts", { maxResults: params.maxResults ?? 20 });
+export async function syncLinkedinToRag(userId: string, params: { maxResults?: number } = {}): Promise<SyncSummary> {
+  const listJson = await callMcpTool("linkedin_list_recent_posts", { maxResults: params.maxResults ?? 20, userId });
   const posts: LinkedinPostSummary[] = JSON.parse(listJson);
 
   let ingested = 0;
   let skipped = 0;
 
   for (const post of posts) {
-    const existing = await documentRepository.findByExternalId("linkedin", post.postUrn);
+    const existing = await documentRepository.findByExternalId(userId, "linkedin", post.postUrn);
     if (existing) {
       skipped++;
       continue;
     }
 
     await ingestText({
+      userId,
       title: post.commentary.slice(0, 60) || "(untitled post)",
       text: `Published: ${post.publishedAt}\n\n${post.commentary}`,
       sourceType: "linkedin",

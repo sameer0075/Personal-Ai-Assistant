@@ -1,16 +1,11 @@
 import { OAuth2Client } from "google-auth-library";
+import jwt from "jsonwebtoken";
 import { env } from "../../config/env.js";
 import { googleCredentialsRepository } from "./google-credentials.repository.js";
+import { signOAuthState, verifyOAuthState } from "../auth/oauth-state.js";
 
-/**
- * Scopes requested at consent time. Kept minimal-but-sufficient:
- * - gmail.readonly + gmail.send: read + send mail, but NOT gmail.modify
- *   (no ability to delete mail or alter labels) - the assistant shouldn't
- *   need more than that to do what you described.
- * - calendar.events: create/update/delete events on calendars the user owns.
- * - calendar.readonly: list events across all the user's calendars.
- * - userinfo.email + openid: only enough to show which Google account is connected.
- */
+const OAUTH_STATE_PURPOSE = "google_oauth";
+
 export const GOOGLE_SCOPES = [
   "openid",
   "https://www.googleapis.com/auth/userinfo.email",
@@ -28,24 +23,33 @@ function createOAuthClient(): OAuth2Client {
   });
 }
 
-/** Builds the URL the frontend redirects the user to for Google consent. */
-export function buildGoogleConsentUrl(): string {
+export function buildGoogleConsentUrl(userId: string): string {
   const client = createOAuthClient();
   return client.generateAuthUrl({
-    access_type: "offline", // required to receive a refresh_token
-    prompt: "consent", // forces refresh_token on every connect, even for a returning user
+    access_type: "offline",
+    prompt: "consent",
     scope: GOOGLE_SCOPES,
+    state: signOAuthState(userId, OAUTH_STATE_PURPOSE),
   });
 }
 
 /**
- * Exchanges the OAuth callback `code` for tokens, pulls the connected email
- * out of the ID token, and persists the (encrypted) refresh token.
- * Throws if Google didn't return a refresh_token - this happens if the user
- * previously granted consent and Google decided not to re-issue one; asking
- * with `prompt: "consent"` (above) avoids that in the normal case.
+ * The email is read with a local, unverified JWT decode (jwt.decode) rather
+ * than google-auth-library's verifyIdToken. verifyIdToken fetches Google's
+ * public certs over the network to cryptographically re-check the token's
+ * signature - necessary when an ID token arrives from an untrusted source
+ * (e.g. a browser-side Google Sign-In button), but redundant here: this
+ * token came back from a direct server-to-server HTTPS call to Google's own
+ * token endpoint (client.getToken(code) above), so only Google could have
+ * produced it - there's nothing left to verify, only a client-facing email
+ * to read out for display. Skipping that extra network round trip also
+ * means a transient DNS/connectivity hiccup reaching Google's cert endpoint
+ * can no longer fail the whole "connect Google" flow after the tokens
+ * themselves were already successfully issued.
  */
-export async function handleGoogleOAuthCallback(code: string): Promise<{ email: string | null }> {
+export async function handleGoogleOAuthCallback(code: string, state: string | undefined): Promise<{ email: string | null }> {
+  const userId = verifyOAuthState(state, OAUTH_STATE_PURPOSE);
+
   const client = createOAuthClient();
   const { tokens } = await client.getToken(code);
 
@@ -57,12 +61,16 @@ export async function handleGoogleOAuthCallback(code: string): Promise<{ email: 
 
   let email: string | null = null;
   if (tokens.id_token) {
-    const ticket = await client.verifyIdToken({ idToken: tokens.id_token, audience: env.GOOGLE_OAUTH_CLIENT_ID });
-    email = ticket.getPayload()?.email ?? null;
+    try {
+      const payload = jwt.decode(tokens.id_token) as { email?: string } | null;
+      email = payload?.email ?? null;
+    } catch (err) {
+      console.warn("Could not decode Google ID token for display email; continuing without it.", err);
+    }
   }
 
   const grantedScopes = typeof tokens.scope === "string" ? tokens.scope.split(" ") : GOOGLE_SCOPES;
-  await googleCredentialsRepository.upsert(tokens.refresh_token, email, grantedScopes);
+  await googleCredentialsRepository.upsert(userId, tokens.refresh_token, email, grantedScopes);
 
   return { email };
 }

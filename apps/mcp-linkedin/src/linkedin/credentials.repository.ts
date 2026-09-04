@@ -2,7 +2,6 @@ import { pool } from "../config/database.js";
 import { env } from "../config/env.js";
 import { encryptSecret, decryptSecret } from "../security/token-crypto.js";
 
-const USER_LABEL = "default"; // matches apps/backend's linkedin-credentials.repository.ts
 const TOKEN_ENDPOINT = "https://www.linkedin.com/oauth/v2/accessToken";
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000; // refresh a little early rather than right at the edge
 
@@ -19,11 +18,11 @@ interface RefreshResponse {
   refresh_token?: string;
 }
 
-async function loadStoredCredentials(): Promise<StoredCredentials> {
+async function loadStoredCredentials(userId: string): Promise<StoredCredentials> {
   const { rows } = await pool.query<StoredCredentials>(
     `SELECT person_urn, access_token_encrypted, refresh_token_encrypted, expires_at
-     FROM linkedin_credentials WHERE user_label = $1`,
-    [USER_LABEL]
+     FROM linkedin_credentials WHERE user_id = $1`,
+    [userId]
   );
 
   if (!rows[0]) {
@@ -35,7 +34,7 @@ async function loadStoredCredentials(): Promise<StoredCredentials> {
   return rows[0];
 }
 
-async function refreshAccessToken(refreshTokenEncrypted: string): Promise<{ accessToken: string; expiresAt: Date }> {
+async function refreshAccessToken(userId: string, refreshTokenEncrypted: string): Promise<{ accessToken: string; expiresAt: Date }> {
   const refreshToken = decryptSecret(refreshTokenEncrypted, env.LINKEDIN_TOKEN_ENCRYPTION_KEY);
 
   const response = await fetch(TOKEN_ENDPOINT, {
@@ -68,39 +67,68 @@ async function refreshAccessToken(refreshTokenEncrypted: string): Promise<{ acce
          refresh_token_encrypted = COALESCE($2, refresh_token_encrypted),
          expires_at = $3,
          updated_at = now()
-     WHERE user_label = $4`,
-    [accessTokenEncrypted, newRefreshTokenEncrypted, expiresAt, USER_LABEL]
+     WHERE user_id = $4`,
+    [accessTokenEncrypted, newRefreshTokenEncrypted, expiresAt, userId]
   );
 
   return { accessToken: data.access_token, expiresAt };
 }
 
+interface CachedCredentials {
+  accessToken: string;
+  personUrn: string;
+  expiresAtMs: number;
+}
+
+const credentialsCache = new Map<string, CachedCredentials>();
+const inFlightRefreshes = new Map<string, Promise<{ accessToken: string; personUrn: string }>>();
+
 /**
  * Returns a valid access token + the user's Person URN, refreshing the token
  * first if it's expired (or about to be) and a refresh token is available.
- *
- * If the token is expired and there's no refresh token - which is the common
- * case, since LinkedIn only issues refresh tokens to apps with special
- * "Programmatic Refresh Tokens" access - this throws a clear, actionable
- * error rather than a raw 401 from LinkedIn.
+ * Scoped by userId to ensure complete multi-user isolation.
  */
-export async function getValidLinkedinCredentials(): Promise<{ accessToken: string; personUrn: string }> {
-  const stored = await loadStoredCredentials();
-  const expiresAt = new Date(stored.expires_at).getTime();
+export async function getValidLinkedinCredentials(userId: string): Promise<{ accessToken: string; personUrn: string }> {
+  const cached = credentialsCache.get(userId);
+  if (cached && Date.now() < cached.expiresAtMs - EXPIRY_BUFFER_MS) {
+    return { accessToken: cached.accessToken, personUrn: cached.personUrn };
+  }
 
-  if (Date.now() < expiresAt - EXPIRY_BUFFER_MS) {
-    return {
-      accessToken: decryptSecret(stored.access_token_encrypted, env.LINKEDIN_TOKEN_ENCRYPTION_KEY),
+  let inFlight = inFlightRefreshes.get(userId);
+  if (inFlight) return inFlight;
+
+  inFlight = (async () => {
+    const stored = await loadStoredCredentials(userId);
+    const expiresAtMs = new Date(stored.expires_at).getTime();
+
+    if (Date.now() < expiresAtMs - EXPIRY_BUFFER_MS) {
+      const creds = {
+        accessToken: decryptSecret(stored.access_token_encrypted, env.LINKEDIN_TOKEN_ENCRYPTION_KEY),
+        personUrn: stored.person_urn,
+        expiresAtMs,
+      };
+      credentialsCache.set(userId, creds);
+      return { accessToken: creds.accessToken, personUrn: creds.personUrn };
+    }
+
+    if (!stored.refresh_token_encrypted) {
+      throw new Error(
+        "The connected LinkedIn account's access token has expired and this app doesn't have refresh-token access. Ask the user to reconnect their LinkedIn account (Settings -> Integrations)."
+      );
+    }
+
+    const refreshed = await refreshAccessToken(userId, stored.refresh_token_encrypted);
+    const creds = {
+      accessToken: refreshed.accessToken,
       personUrn: stored.person_urn,
+      expiresAtMs: refreshed.expiresAt.getTime(),
     };
-  }
+    credentialsCache.set(userId, creds);
+    return { accessToken: creds.accessToken, personUrn: creds.personUrn };
+  })().finally(() => {
+    inFlightRefreshes.delete(userId);
+  });
 
-  if (!stored.refresh_token_encrypted) {
-    throw new Error(
-      "The connected LinkedIn account's access token has expired and this app doesn't have refresh-token access. Ask the user to reconnect their LinkedIn account (Settings -> Integrations)."
-    );
-  }
-
-  const refreshed = await refreshAccessToken(stored.refresh_token_encrypted);
-  return { accessToken: refreshed.accessToken, personUrn: stored.person_urn };
+  inFlightRefreshes.set(userId, inFlight);
+  return inFlight;
 }

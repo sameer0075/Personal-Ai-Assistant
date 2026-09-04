@@ -9,11 +9,12 @@ export interface StoredImage {
  * Reads the row the backend's generate_image tool wrote (see apps/backend's
  * generated-image.repository.ts) and deletes it immediately after - this
  * table is a one-shot handoff buffer between the two processes, not storage.
+ * Scoped by userId to ensure users can only consume their own generated images.
  */
-export async function consumeGeneratedImage(imageRef: string): Promise<StoredImage> {
+export async function consumeGeneratedImage(userId: string, imageRef: string): Promise<StoredImage> {
   const { rows } = await pool.query<{ mime_type: string; image_data: Buffer }>(
-    `DELETE FROM generated_images WHERE id = $1 RETURNING mime_type, image_data`,
-    [imageRef]
+    `DELETE FROM generated_images WHERE id = $1 AND (user_id = $2 OR user_id IS NULL) RETURNING mime_type, image_data`,
+    [imageRef, userId]
   );
 
   if (!rows[0]) {

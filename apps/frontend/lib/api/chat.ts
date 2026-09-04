@@ -1,4 +1,5 @@
 import { API_BASE_URL, apiFetch, apiJson } from "./client";
+import { getToken, clearToken } from "../auth/token";
 import type { PendingAction } from "./actions";
 
 export interface ToolCallTrace {
@@ -134,7 +135,10 @@ async function postStream(
   signal?: AbortSignal,
   file?: File
 ) {
-  const { body, headers } = buildChatBody(fields, file);
+  const { body, headers: bodyHeaders } = buildChatBody(fields, file);
+  const token = getToken();
+  const headers = new Headers(bodyHeaders);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
@@ -142,6 +146,13 @@ async function postStream(
     body,
     signal,
   });
+
+  if (res.status === 401 && token) {
+    clearToken();
+    if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
+  }
 
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({}));

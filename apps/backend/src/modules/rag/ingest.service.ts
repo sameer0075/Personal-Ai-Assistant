@@ -15,25 +15,24 @@ function mimeTypeFor(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   return MIME_BY_EXTENSION[ext] ?? "application/octet-stream";
 }
-/**
- * File-specific entry point into the shared ingestion pipeline: extract text
- * from the upload (pdf/docx/txt), then hand off to `ingestText`.
- */
+
 export async function ingestFile(params: {
+  userId: string;
   buffer: Buffer;
   filename: string;
   sourceType: SourceType;
   replaceExisting?: boolean;
 }): Promise<IngestResult> {
-  const { buffer, filename, sourceType, replaceExisting = false } = params;
+  const { userId, buffer, filename, sourceType, replaceExisting = false } = params;
 
   if (replaceExisting) {
-    await documentRepository.deleteDocumentsBySourceType(sourceType);
+    await documentRepository.deleteDocumentsBySourceType(userId, sourceType);
   }
 
   const rawText = await extractTextFromFile(buffer, filename);
 
   return ingestText({
+    userId,
     text: rawText,
     title: filename,
     sourceType,

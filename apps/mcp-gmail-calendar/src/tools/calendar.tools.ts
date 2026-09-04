@@ -2,6 +2,10 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as calendarClient from "../google/calendar.client.js";
 import { jsonResult, errorResult } from "./tool-result.js";
+import { requireUserId } from "./require-user-id.js";
+
+/** See the comment above userIdField in gmail.tools.ts - same rationale (including why it's .optional()) applies here. */
+const userIdField = z.string().uuid().optional().describe("Injected server-side - identifies which user's Google account to use");
 
 export function registerCalendarTools(server: McpServer): void {
   server.registerTool(
@@ -15,11 +19,13 @@ export function registerCalendarTools(server: McpServer): void {
         timeMin: z.string().datetime().optional().describe("ISO 8601 datetime, e.g. 2026-08-02T00:00:00Z"),
         timeMax: z.string().datetime().optional().describe("ISO 8601 datetime"),
         maxResults: z.number().int().min(1).max(50).optional().describe("Max events to return (default 25)"),
+        userId: userIdField,
       },
     },
-    async ({ timeMin, timeMax, maxResults }) => {
+    async ({ timeMin, timeMax, maxResults, userId }) => {
       try {
-        const events = await calendarClient.listEvents({ timeMin, timeMax, maxResults });
+        const uid = requireUserId(userId);
+        const events = await calendarClient.listEvents(uid, { timeMin, timeMax, maxResults });
         return jsonResult(events);
       } catch (err) {
         return errorResult(err);
@@ -41,11 +47,13 @@ export function registerCalendarTools(server: McpServer): void {
         endDateTime: z.string().datetime().describe("ISO 8601 datetime"),
         timeZone: z.string().optional().describe("IANA timezone, e.g. 'Asia/Karachi' (default: calendar's timezone)"),
         attendees: z.array(z.string().email()).optional().describe("Attendee email addresses to invite"),
+        userId: userIdField,
       },
     },
-    async ({ summary, description, startDateTime, endDateTime, timeZone, attendees }) => {
+    async ({ summary, description, startDateTime, endDateTime, timeZone, attendees, userId }) => {
       try {
-        const event = await calendarClient.createEvent({
+        const uid = requireUserId(userId);
+        const event = await calendarClient.createEvent(uid, {
           summary,
           description,
           startDateTime,
@@ -67,11 +75,13 @@ export function registerCalendarTools(server: McpServer): void {
       description: "Deletes an event from the user's primary Google Calendar by event ID. This cannot be undone.",
       inputSchema: {
         eventId: z.string().describe("The Calendar event ID, from calendar_list_events"),
+        userId: userIdField,
       },
     },
-    async ({ eventId }) => {
+    async ({ eventId, userId }) => {
       try {
-        await calendarClient.deleteEvent(eventId);
+        const uid = requireUserId(userId);
+        await calendarClient.deleteEvent(uid, eventId);
         return jsonResult({ deleted: true, eventId });
       } catch (err) {
         return errorResult(err);

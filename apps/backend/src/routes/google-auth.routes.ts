@@ -3,45 +3,39 @@ import { z } from "zod";
 import { env } from "../config/env.js";
 import { buildGoogleConsentUrl, handleGoogleOAuthCallback } from "../modules/google-auth/google-oauth.service.js";
 import { googleCredentialsRepository } from "../modules/google-auth/google-credentials.repository.js";
+import { requireAuth } from "../modules/auth/auth.middleware.js";
 
 export const googleAuthRoutes = Router();
 
-/** GET /api/google/auth-url - frontend redirects the browser to this URL. */
-googleAuthRoutes.get("/auth-url", (_req, res) => {
-  res.json({ url: buildGoogleConsentUrl() });
+googleAuthRoutes.get("/auth-url", requireAuth, (req, res) => {
+  res.json({ url: buildGoogleConsentUrl(req.userId!) });
 });
 
-/** GET /api/google/status - has the user connected a Google account? */
-googleAuthRoutes.get("/status", async (_req, res) => {
-  const status = await googleCredentialsRepository.getStatus();
+googleAuthRoutes.get("/status", requireAuth, async (req, res) => {
+  const status = await googleCredentialsRepository.getStatus(req.userId!);
   res.json(status);
 });
 
-/** POST /api/google/disconnect - revoke locally stored credentials. */
-googleAuthRoutes.post("/disconnect", async (_req, res) => {
-  await googleCredentialsRepository.disconnect();
+googleAuthRoutes.post("/disconnect", requireAuth, async (req, res) => {
+  await googleCredentialsRepository.disconnect(req.userId!);
   res.status(204).end();
 });
 
 const callbackQuerySchema = z.object({
   code: z.string().optional(),
+  state: z.string().optional(),
   error: z.string().optional(),
 });
 
-/**
- * GET /api/google/callback - Google redirects here after consent.
- * We exchange the code server-side, then bounce the browser back to the
- * frontend with a simple success/error flag (never expose tokens in the URL).
- */
 googleAuthRoutes.get("/callback", async (req, res) => {
-  const { code, error } = callbackQuerySchema.parse(req.query);
+  const { code, state, error } = callbackQuerySchema.parse(req.query);
 
   if (error || !code) {
     return res.redirect(`${env.FRONTEND_BASE_URL}/integrations?google=error`);
   }
 
   try {
-    await handleGoogleOAuthCallback(code);
+    await handleGoogleOAuthCallback(code, state);
     res.redirect(`${env.FRONTEND_BASE_URL}/integrations?google=connected`);
   } catch (err) {
     console.error("Google OAuth callback failed", err);

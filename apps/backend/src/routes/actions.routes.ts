@@ -7,11 +7,13 @@ import {
   approvePendingAction,
   rejectPendingAction,
 } from "../modules/actions/pending-actions.service.js";
+import { requireAuth } from "../modules/auth/auth.middleware.js";
 
 export const actionsRoutes = Router();
+actionsRoutes.use(requireAuth);
 
-actionsRoutes.get("/pending", async (_req, res) => {
-  res.json(await listPendingActions());
+actionsRoutes.get("/pending", async (req, res) => {
+  res.json(await listPendingActions(req.userId!));
 });
 
 const emailDraftSchema = z.object({
@@ -25,21 +27,19 @@ const emailDraftSchema = z.object({
 actionsRoutes.post("/email/draft", async (req, res) => {
   try {
     const payload = emailDraftSchema.parse(req.body);
-    const action = await createEmailDraft(payload, "user");
+    const action = await createEmailDraft(req.userId!, payload, "user");
     res.status(201).json(action);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to draft email" });
   }
 });
 
-const linkedinDraftSchema = z.object({
-  commentary: z.string().min(1).max(3000),
-});
+const linkedinDraftSchema = z.object({ commentary: z.string().min(1).max(3000) });
 
 actionsRoutes.post("/linkedin/draft", async (req, res) => {
   try {
     const payload = linkedinDraftSchema.parse(req.body);
-    const action = await createLinkedinDraft(payload, "user");
+    const action = await createLinkedinDraft(req.userId!, payload, "user");
     res.status(201).json(action);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to draft post" });
@@ -58,7 +58,7 @@ const approveSchema = z.object({
 actionsRoutes.post("/:id/approve", async (req, res) => {
   try {
     const edits = approveSchema.parse(req.body ?? {});
-    const action = await approvePendingAction(req.params.id, edits);
+    const action = await approvePendingAction(req.params.id, req.userId!, edits);
     res.json(action);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to approve action" });
@@ -67,7 +67,7 @@ actionsRoutes.post("/:id/approve", async (req, res) => {
 
 actionsRoutes.post("/:id/reject", async (req, res) => {
   try {
-    const action = await rejectPendingAction(req.params.id);
+    const action = await rejectPendingAction(req.params.id, req.userId!);
     res.json(action);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to reject action" });

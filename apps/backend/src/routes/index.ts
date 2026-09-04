@@ -8,9 +8,11 @@ import { linkedinAuthRoutes } from "./linkedin-auth.routes.js";
 import { linkedinRoutes } from "./linkedin.routes.js";
 import { actionsRoutes } from "./actions.routes.js";
 import { sessionsRoutes } from "./sessions.routes.js";
+import { authRoutes } from "./auth.routes.js";
 
 export const apiRouter = Router();
 
+apiRouter.use("/auth", authRoutes);
 apiRouter.use("/documents", documentRoutes);
 apiRouter.use("/chat", chatRoutes);
 apiRouter.use("/google", googleAuthRoutes);

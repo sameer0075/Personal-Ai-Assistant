@@ -1,5 +1,8 @@
 import { env } from "../../config/env.js";
 import { linkedinCredentialsRepository } from "./linkedin-credentials.repository.js";
+import { signOAuthState, verifyOAuthState } from "../auth/oauth-state.js";
+
+const OAUTH_STATE_PURPOSE = "linkedin_oauth";
 
 /**
  * Scopes requested at consent time:
@@ -20,12 +23,13 @@ const AUTHORIZATION_ENDPOINT = "https://www.linkedin.com/oauth/v2/authorization"
 const TOKEN_ENDPOINT = "https://www.linkedin.com/oauth/v2/accessToken";
 const USERINFO_ENDPOINT = "https://api.linkedin.com/v2/userinfo";
 
-export function buildLinkedinConsentUrl(): string {
+export function buildLinkedinConsentUrl(userId: string): string {
   const params = new URLSearchParams({
     response_type: "code",
     client_id: env.LINKEDIN_OAUTH_CLIENT_ID,
     redirect_uri: env.LINKEDIN_OAUTH_REDIRECT_URI,
     scope: LINKEDIN_SCOPES.join(" "),
+    state: signOAuthState(userId, OAUTH_STATE_PURPOSE),
   });
   return `${AUTHORIZATION_ENDPOINT}?${params.toString()}`;
 }
@@ -44,15 +48,14 @@ interface LinkedinUserInfo {
 /**
  * Exchanges the OAuth callback `code` for tokens, resolves the member's
  * Person URN via the OpenID Connect userinfo endpoint, and persists the
- * (encrypted) access + refresh tokens.
- *
- * Note: `refresh_token` in the response is only present if this app has been
- * granted LinkedIn's "Programmatic Refresh Tokens" access - most apps won't
- * have it by default, in which case the user simply reconnects every ~60 days
- * when the access token expires (see linkedinCredentialsRepository - refresh
- * is nullable for exactly this reason).
+ * (encrypted) access + refresh tokens scoped to the authenticated user.
  */
-export async function handleLinkedinOAuthCallback(code: string): Promise<{ personUrn: string }> {
+export async function handleLinkedinOAuthCallback(
+  code: string,
+  state: string | undefined
+): Promise<{ personUrn: string }> {
+  const userId = verifyOAuthState(state, OAUTH_STATE_PURPOSE);
+
   const tokenResponse = await fetch(TOKEN_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -82,7 +85,7 @@ export async function handleLinkedinOAuthCallback(code: string): Promise<{ perso
   const userInfo = (await userInfoResponse.json()) as LinkedinUserInfo;
   const personUrn = `urn:li:person:${userInfo.sub}`;
 
-  await linkedinCredentialsRepository.upsert({
+  await linkedinCredentialsRepository.upsert(userId, {
     personUrn,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token ?? null,

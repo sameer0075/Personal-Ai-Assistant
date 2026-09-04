@@ -1,15 +1,16 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import { createLinkedinDraft } from "../../actions/pending-actions.service.js";
 
-/**
- * Replaces direct binding of the raw `linkedin_create_post` MCP tool to the
- * agent. This tool never touches LinkedIn - it only queues a draft for human
- * review.
- */
 export const linkedinDraftPostTool = tool(
-  async ({ commentary }: { commentary: string }) => {
-    const action = await createLinkedinDraft({ commentary });
+  async ({ commentary }: { commentary: string }, config?: RunnableConfig) => {
+    const userId: any = config?.configurable?.userId as string | undefined;
+    if (!userId) {
+      throw new Error("linkedin_draft_post called without a userId in context - this is a bug, not a user-facing error.");
+    }
+
+    const action = await createLinkedinDraft(userId, { commentary });
     return JSON.stringify({
       drafted: true,
       pendingActionId: action.id,

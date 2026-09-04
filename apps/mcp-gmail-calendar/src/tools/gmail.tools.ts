@@ -3,6 +3,25 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as gmailClient from "../google/gmail.client.js";
 import { jsonResult, errorResult } from "./tool-result.js";
 import { getStoredFileBySourceType } from "../google/document-file.repository.js";
+import { requireUserId } from "./require-user-id.js";
+
+/**
+ * Every tool below declares a `userId` field. It is never something the
+ * calling LLM sees or fills in - apps/backend's mcp-schema-to-zod.ts strips
+ * it from the schema shown to the model, and mcp-tool-adapter.ts always
+ * injects the real value here (from whichever user's turn is actually
+ * running) right before the call reaches this server. It's declared here
+ * purely so this server's own zod validation doesn't silently strip that
+ * key out of the incoming arguments before our handler ever sees it - by
+ * default `z.object()` drops unrecognized keys rather than erroring.
+ *
+ * Deliberately OPTIONAL (not required) at the schema level: if it's ever
+ * missing (see require-user-id.ts for why that can happen), we want our own
+ * clear, actionable error from requireUserId() below - not a terse zod
+ * "Required"/"Invalid uuid" validation failure the LLM then has to guess at
+ * and paraphrase for the user.
+ */
+const userIdField = z.string().uuid().optional().describe("Injected server-side - identifies which user's Google account to use");
 
 export function registerGmailTools(server: McpServer): void {
   server.registerTool(
@@ -16,11 +35,13 @@ export function registerGmailTools(server: McpServer): void {
       inputSchema: {
         query: z.string().optional().describe("Gmail search syntax, e.g. 'is:unread from:someone@example.com'"),
         maxResults: z.number().int().min(1).max(50).optional().describe("Max messages to return (default 20)"),
+        userId: userIdField,
       },
     },
-    async ({ query, maxResults }) => {
+    async ({ query, maxResults, userId }) => {
       try {
-        const messages = await gmailClient.listMessages({ query, maxResults });
+        const uid = requireUserId(userId);
+        const messages = await gmailClient.listMessages(uid, { query, maxResults });
         return jsonResult(messages);
       } catch (err) {
         return errorResult(err);
@@ -35,11 +56,13 @@ export function registerGmailTools(server: McpServer): void {
       description: "Fetches the full subject, sender, recipient, date, and plain-text body of a single Gmail message by ID.",
       inputSchema: {
         messageId: z.string().describe("The Gmail message ID, from gmail_list_messages"),
+        userId: userIdField,
       },
     },
-    async ({ messageId }) => {
+    async ({ messageId, userId }) => {
       try {
-        const message = await gmailClient.getMessage(messageId);
+        const uid = requireUserId(userId);
+        const message = await gmailClient.getMessage(uid, messageId);
         return jsonResult(message);
       } catch (err) {
         return errorResult(err);
@@ -65,14 +88,16 @@ export function registerGmailTools(server: McpServer): void {
           .boolean()
           .optional()
           .describe("Set true to attach the user's most recently uploaded CV file to this email"),
+        userId: userIdField,
       },
     },
-    async ({ to, subject, body, cc, attachCv }) => {
+    async ({ to, subject, body, cc, attachCv, userId }) => {
       try {
+        const uid = requireUserId(userId);
         let attachment: { filename: string; mimeType: string; base64Data: string } | undefined;
 
         if (attachCv) {
-          const file = await getStoredFileBySourceType("cv");
+          const file = await getStoredFileBySourceType(uid, "cv");
           if (!file) {
             return errorResult(
               new Error("No CV file is on record to attach. Ask the user to upload their CV first.")
@@ -81,7 +106,7 @@ export function registerGmailTools(server: McpServer): void {
           attachment = file;
         }
 
-        const result = await gmailClient.sendMessage({ to, subject, body, cc, attachment });
+        const result = await gmailClient.sendMessage(uid, { to, subject, body, cc, attachment });
         return jsonResult({ sent: true, attached: Boolean(attachment), ...result });
       } catch (err) {
         return errorResult(err);
@@ -89,48 +114,48 @@ export function registerGmailTools(server: McpServer): void {
     }
   );
 
-  // add inside registerGmailTools, alongside the existing gmail_send_message registration
-
-server.registerTool(
-  "gmail_send_bulk",
-  {
-    title: "Send a bulk email",
-    description:
-      "Sends the SAME subject/body email to MANY recipients in one call (e.g. job application emails to a list " +
-      "of company addresses). Use this instead of calling gmail_send_message repeatedly in a loop - this handles " +
-      "the whole batch in a single tool call. Set attachCv: true to attach the user's CV to every email sent.",
-    inputSchema: {
-      recipients: z.array(z.string().email()).min(1).max(200).describe("List of recipient email addresses"),
-      subject: z.string().min(1).describe("Email subject line, same for every recipient"),
-      body: z.string().min(1).describe("Plain-text email body, same for every recipient"),
-      attachCv: z.boolean().optional().describe("Set true to attach the user's most recently uploaded CV to every email"),
+  server.registerTool(
+    "gmail_send_bulk",
+    {
+      title: "Send a bulk email",
+      description:
+        "Sends the SAME subject/body email to MANY recipients in one call (e.g. job application emails to a list " +
+        "of company addresses). Use this instead of calling gmail_send_message repeatedly in a loop - this handles " +
+        "the whole batch in a single tool call. Set attachCv: true to attach the user's CV to every email sent.",
+      inputSchema: {
+        recipients: z.array(z.string().email()).min(1).max(200).describe("List of recipient email addresses"),
+        subject: z.string().min(1).describe("Email subject line, same for every recipient"),
+        body: z.string().min(1).describe("Plain-text email body, same for every recipient"),
+        attachCv: z.boolean().optional().describe("Set true to attach the user's most recently uploaded CV to every email"),
+        userId: userIdField,
+      },
     },
-  },
-  async ({ recipients, subject, body, attachCv }) => {
-    try {
-      let attachment: { filename: string; mimeType: string; base64Data: string } | undefined;
+    async ({ recipients, subject, body, attachCv, userId }) => {
+      try {
+        const uid = requireUserId(userId);
+        let attachment: { filename: string; mimeType: string; base64Data: string } | undefined;
 
-      if (attachCv) {
-        const file = await getStoredFileBySourceType("cv");
-        if (!file) {
-          return errorResult(new Error("No CV file is on record to attach. Ask the user to upload their CV first."));
+        if (attachCv) {
+          const file = await getStoredFileBySourceType(uid, "cv");
+          if (!file) {
+            return errorResult(new Error("No CV file is on record to attach. Ask the user to upload their CV first."));
+          }
+          attachment = file;
         }
-        attachment = file;
+
+        const results = await gmailClient.sendBulkMessages(uid, { recipients, subject, body, attachment });
+        const sent = results.filter((r) => r.sent).length;
+        const failed = results.filter((r) => !r.sent);
+
+        return jsonResult({
+          totalRecipients: recipients.length,
+          sent,
+          failed: failed.length,
+          failures: failed, // so the agent can report which addresses bounced and why
+        });
+      } catch (err) {
+        return errorResult(err);
       }
-
-      const results = await gmailClient.sendBulkMessages({ recipients, subject, body, attachment });
-      const sent = results.filter((r) => r.sent).length;
-      const failed = results.filter((r) => !r.sent);
-
-      return jsonResult({
-        totalRecipients: recipients.length,
-        sent,
-        failed: failed.length,
-        failures: failed, // so the agent can report which addresses bounced and why
-      });
-    } catch (err) {
-      return errorResult(err);
     }
-  }
-);
+  );
 }

@@ -1,12 +1,14 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import { generateImage } from "../../image-gen/image-generation.service.js";
 import { storeGeneratedImage } from "../../image-gen/generated-image.repository.js";
 
 export const generateImageTool = tool(
-  async ({ prompt }: { prompt: string }) => {
+  async ({ prompt }: { prompt: string }, config?: RunnableConfig) => {
+    const userId = config?.configurable?.userId as string | undefined;
     const image = await generateImage(prompt);
-    const imageRef = await storeGeneratedImage({ data: image.data, mimeType: image.mimeType, prompt });
+    const imageRef = await storeGeneratedImage({ userId, data: image.data, mimeType: image.mimeType, prompt });
 
     return (
       `Image generated. imageRef: ${imageRef}\n` +

@@ -20,16 +20,14 @@ function commonHeaders(accessToken: string): Record<string, string> {
  * backend's generate_image tool via Postgres - see images.repository.ts) is
  * uploaded to LinkedIn first via its two-step Images API, then attached to
  * the post through `content.media.id`.
- *
- * LinkedIn's create-post response has no JSON body on success (201) - the
- * new post's URN comes back in the `x-restli-id` response header instead.
+ * Scoped by userId for multi-user support.
  */
-export async function createPost(commentary: string, imageRef?: string): Promise<{ postUrn: string }> {
-  const { accessToken, personUrn } = await getValidLinkedinCredentials();
+export async function createPost(userId: string, commentary: string, imageRef?: string): Promise<{ postUrn: string }> {
+  const { accessToken, personUrn } = await getValidLinkedinCredentials(userId);
 
   let content: { media: { id: string } } | undefined;
   if (imageRef) {
-    const image = await consumeGeneratedImage(imageRef);
+    const image = await consumeGeneratedImage(userId, imageRef);
     const { imageUrn } = await uploadImage({ accessToken, personUrn, data: image.data, mimeType: image.mimeType });
     content = { media: { id: imageUrn } };
   }
@@ -64,8 +62,8 @@ export async function createPost(commentary: string, imageRef?: string): Promise
   return { postUrn };
 }
 
-export async function deletePost(postUrn: string): Promise<void> {
-  const { accessToken } = await getValidLinkedinCredentials();
+export async function deletePost(userId: string, postUrn: string): Promise<void> {
+  const { accessToken } = await getValidLinkedinCredentials(userId);
 
   const response = await fetch(`${POSTS_ENDPOINT}/${encodeURIComponent(postUrn)}`, {
     method: "DELETE",

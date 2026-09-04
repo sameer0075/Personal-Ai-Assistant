@@ -83,5 +83,10 @@ function objectToZod(schema: JsonSchemaProperty): z.ZodObject<Record<string, z.Z
 }
 
 export function mcpInputSchemaToZod(inputSchema: Record<string, unknown>): z.ZodObject<Record<string, z.ZodTypeAny>> {
-  return objectToZod(inputSchema as JsonSchemaProperty);
+  const schema = inputSchema as JsonSchemaProperty;
+  if (schema.properties && "userId" in schema.properties) {
+    const { userId: _omit, ...rest } = schema.properties;
+    return objectToZod({ ...schema, properties: rest, required: (schema.required ?? []).filter((k) => k !== "userId") });
+  }
+  return objectToZod(schema);
 }

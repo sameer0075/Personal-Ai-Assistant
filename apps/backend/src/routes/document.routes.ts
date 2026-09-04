@@ -2,8 +2,10 @@ import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
 import { ingestFile } from "../modules/rag/ingest.service.js";
+import { requireAuth } from "../modules/auth/auth.middleware.js";
 
 export const documentRoutes = Router();
+documentRoutes.use(requireAuth);
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -29,6 +31,7 @@ documentRoutes.post("/upload", upload.single("file"), async (req, res) => {
     const { sourceType, replaceExisting } = uploadQuerySchema.parse(req.query);
 
     const result = await ingestFile({
+      userId: req.userId!,
       buffer: req.file.buffer,
       filename: req.file.originalname,
       sourceType,

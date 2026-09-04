@@ -5,33 +5,29 @@ import type { AssistantAnswer, ChatSession, ChatMessageRecord, ChatAttachment } 
 
 export const HISTORY_WINDOW = 10;
 
-export function listSessions(): Promise<ChatSession[]> {
-  return chatSessionRepository.listSessions();
+export function listSessions(userId: string): Promise<ChatSession[]> {
+  return chatSessionRepository.listSessions(userId);
 }
 
-export function getAllMessages(sessionId: string): Promise<ChatMessageRecord[]> {
+export async function getAllMessages(sessionId: string, userId: string): Promise<ChatMessageRecord[]> {
+  const session = await chatSessionRepository.getSession(sessionId, userId);
+  if (!session) throw new Error("Chat not found");
   return chatSessionRepository.getAllMessages(sessionId);
 }
 
-export function deleteSession(sessionId: string): Promise<void> {
-  return chatSessionRepository.deleteSession(sessionId);
+export function deleteSession(sessionId: string, userId: string): Promise<void> {
+  return chatSessionRepository.deleteSession(sessionId, userId);
 }
 
-export async function getOrCreateSession(sessionId?: string): Promise<ChatSession> {
+export async function getOrCreateSession(userId: string, sessionId?: string): Promise<ChatSession> {
   if (sessionId) {
-    const existing = await chatSessionRepository.getSession(sessionId);
-    if (existing) return existing;
+    const existing = await chatSessionRepository.getSession(sessionId, userId);
+    if (!existing) throw new Error("Chat not found");
+    return existing;
   }
-  return chatSessionRepository.createSession();
+  return chatSessionRepository.createSession(userId);
 }
 
-/**
- * Builds the agent's view of recent history. A message's `content` column is
- * always the user's raw typed text (used for display/editing); here it's
- * merged with any attached file text via formatContentForAgent, so a file
- * attached a few turns back is still visible to the agent on follow-up
- * questions ("what does page 2 say?") without re-uploading it.
- */
 export async function getHistoryForAgent(
   sessionId: string
 ): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
@@ -39,53 +35,34 @@ export async function getHistoryForAgent(
   return rows.map((r) => ({ role: r.role, content: formatContentForAgent(r.content, r.attachments) }));
 }
 
-/**
- * Persists both sides of a turn, sets the session's sidebar title from the
- * first user message if it's still the default, and returns the new row ids
- * so the frontend can attach them to messages for future edits.
- */
 export async function recordTurn(
   sessionId: string,
   question: string,
   result: AssistantAnswer,
   attachments?: ChatAttachment[]
 ): Promise<{ userMessageId: string; assistantMessageId: string }> {
-  const userMessage = await chatSessionRepository.appendMessage({
-    sessionId,
-    role: "user",
-    content: question,
-    attachments,
-  });
+  const userMessage = await chatSessionRepository.appendMessage({ sessionId, role: "user", content: question, attachments });
   const assistantMessage = await chatSessionRepository.appendMessage({
-    sessionId,
-    role: "assistant",
-    content: result.answer,
-    toolCalls: result.toolCalls,
+    sessionId, role: "assistant", content: result.answer, toolCalls: result.toolCalls,
     pendingActionIds: result.pendingActions.map((a) => a.id),
   });
   await chatSessionRepository.setTitleIfDefault(sessionId, question.slice(0, 48));
   return { userMessageId: userMessage.id, assistantMessageId: assistantMessage.id };
 }
 
-/**
- * NEW - edit support. Validates the message belongs to this session and is
- * a user message, then deletes it and everything after it (its old reply
- * included). The caller then runs a normal turn with the edited question,
- * exactly like a brand-new message - this function only does the cut.
- */
-export async function editUserMessage(sessionId: string, messageId: string): Promise<void> {
+export async function editUserMessage(sessionId: string, userId: string, messageId: string): Promise<void> {
+  const session = await chatSessionRepository.getSession(sessionId, userId);
+  if (!session) throw new Error("Chat not found");
+
   const message = await chatSessionRepository.getMessage(messageId);
-  if (!message || message.sessionId !== sessionId) {
-    throw new Error("Message not found in this session");
-  }
-  if (message.role !== "user") {
-    throw new Error("Only your own messages can be edited");
-  }
+  if (!message || message.sessionId !== sessionId) throw new Error("Message not found in this session");
+  if (message.role !== "user") throw new Error("Only your own messages can be edited");
   await chatSessionRepository.deleteMessagesFrom(sessionId, message.createdAt);
 }
 
-export function indexTurnForRecall(sessionId: string, question: string, answer: string): void {
+export function indexTurnForRecall(userId: string, sessionId: string, question: string, answer: string): void {
   ingestText({
+    userId,
     title: question.slice(0, 60),
     text: `User asked: ${question}\n\nAssistant answered: ${answer}`,
     sourceType: "conversation",

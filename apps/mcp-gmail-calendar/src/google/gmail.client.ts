@@ -26,8 +26,8 @@ export interface BulkSendResult {
   error?: string;
 }
 
-async function getGmailClient(): Promise<gmail_v1.Gmail> {
-  const auth = await getGoogleAuthClient();
+async function getGmailClient(userId: string): Promise<gmail_v1.Gmail> {
+  const auth = await getGoogleAuthClient(userId);
   return google.gmail({ version: "v1", auth });
 }
 
@@ -58,8 +58,11 @@ function extractPlainTextBody(payload: gmail_v1.Schema$MessagePart | undefined):
   return payload.body?.data ? decodeBase64Url(payload.body.data) : "";
 }
 
-export async function listMessages(params: { query?: string; maxResults?: number }): Promise<GmailMessageSummary[]> {
-  const gmail = await getGmailClient();
+export async function listMessages(
+  userId: string,
+  params: { query?: string; maxResults?: number }
+): Promise<GmailMessageSummary[]> {
+  const gmail = await getGmailClient(userId);
 
   const { data } = await gmail.users.messages.list({
     userId: "me",
@@ -92,8 +95,8 @@ export async function listMessages(params: { query?: string; maxResults?: number
   return summaries;
 }
 
-export async function getMessage(messageId: string): Promise<GmailMessageFull> {
-  const gmail = await getGmailClient();
+export async function getMessage(userId: string, messageId: string): Promise<GmailMessageFull> {
+  const gmail = await getGmailClient(userId);
 
   const { data } = await gmail.users.messages.get({ userId: "me", id: messageId, format: "full" });
 
@@ -108,14 +111,17 @@ export async function getMessage(messageId: string): Promise<GmailMessageFull> {
   };
 }
 
-export async function sendMessage(params: {
-  to: string;
-  subject: string;
-  body: string;
-  cc?: string;
-  attachment?: { filename: string; mimeType: string; base64Data: string };
-}): Promise<{ id: string; threadId: string }> {
-  const gmail = await getGmailClient();
+export async function sendMessage(
+  userId: string,
+  params: {
+    to: string;
+    subject: string;
+    body: string;
+    cc?: string;
+    attachment?: { filename: string; mimeType: string; base64Data: string };
+  }
+): Promise<{ id: string; threadId: string }> {
+  const gmail = await getGmailClient(userId);
   const raw = buildRawEmail(params);
 
   const { data } = await gmail.users.messages.send({ userId: "me", requestBody: { raw } });
@@ -123,19 +129,22 @@ export async function sendMessage(params: {
   return { id: data.id!, threadId: data.threadId! };
 }
 
-export async function sendBulkMessages(params: {
-  recipients: string[];
-  subject: string;
-  body: string;
-  attachment?: { filename: string; mimeType: string; base64Data: string };
-  delayMs?: number;
-}): Promise<BulkSendResult[]> {
+export async function sendBulkMessages(
+  userId: string,
+  params: {
+    recipients: string[];
+    subject: string;
+    body: string;
+    attachment?: { filename: string; mimeType: string; base64Data: string };
+    delayMs?: number;
+  }
+): Promise<BulkSendResult[]> {
   const { recipients, subject, body, attachment, delayMs = 1500 } = params;
   const results: BulkSendResult[] = [];
 
   for (const to of recipients) {
     try {
-      const result = await sendMessage({ to, subject, body, attachment });
+      const result = await sendMessage(userId, { to, subject, body, attachment });
       results.push({ to, sent: true, ...result });
     } catch (err) {
       results.push({ to, sent: false, error: err instanceof Error ? err.message : "Unknown error" });

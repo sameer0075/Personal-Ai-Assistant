@@ -10,6 +10,7 @@ export interface IngestResult {
 }
 
 export interface IngestTextParams {
+  userId: string;
   text: string;
   title: string;
   sourceType: SourceType;
@@ -17,21 +18,13 @@ export interface IngestTextParams {
   file?: { data: Buffer; mimeType: string };
 }
 
-/**
- * The one place plain text becomes searchable memory: chunk -> embed -> store.
- * Every ingestion path (CV file upload, a Gmail thread, a calendar event, and
- * later a PR diff or a LinkedIn draft) funnels through this exact function -
- * only the caller supplying `text`/`title`/`sourceType`/`metadata` differs.
- * That's what makes "behave as RAG in some cases" apply uniformly across
- * every module instead of each module reinventing chunk/embed/store.
- */
 export async function ingestText(params: IngestTextParams): Promise<IngestResult> {
-  const { text, title, sourceType, metadata = {}, file } = params;
+  const { userId, text, title, sourceType, metadata = {}, file } = params;
   if (!text.trim()) throw new Error(`No text to ingest for "${title}"`);
 
   const chunks = chunkText(text);
   const embeddings = await embeddingService.embedBatch(chunks);
-  const document = await documentRepository.createDocument(title, sourceType, metadata, file); // pass file through
+  const document = await documentRepository.createDocument(userId, title, sourceType, metadata, file);
 
   await documentRepository.insertChunks(
     document.id,

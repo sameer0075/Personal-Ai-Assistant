@@ -2,6 +2,12 @@ export type SourceType = "cv" | "email" | "pr" | "linkedin" | "calendar" | "gene
 export type PendingActionType = "email" | "linkedin_post";
 export type PendingActionStatus = "pending" | "approved" | "rejected";
 
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
 export interface EmailActionPayload {
   to: string;
   subject: string;

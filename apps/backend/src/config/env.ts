@@ -51,6 +51,8 @@ const envSchema = z.object({
   LINKEDIN_API_VERSION: z.string().default("202607"),
 
   FRONTEND_BASE_URL: z.string().default("http://localhost:3000"),
+  JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters long"),
+  JWT_EXPIRES_IN: z.string().default("30d"),
 
   // --- MCP servers (one entry per external service the agent can act on) ---
   // How the backend spawns each MCP server as a child process over stdio.

@@ -9,16 +9,17 @@ function toVectorLiteral(embedding: number[]): string {
 
 export const documentRepository = {
   async createDocument(
+    userId: string,
     title: string,
     sourceType: SourceType,
     metadata: Record<string, unknown> = {},
     file?: { data: Buffer; mimeType: string }
   ): Promise<DocumentRecord> {
     const { rows } = await pool.query<DocumentRecord>(
-      `INSERT INTO documents (title, source_type, metadata, file_data, mime_type)
-      VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO documents (user_id, title, source_type, metadata, file_data, mime_type)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING id, title, source_type, metadata, created_at`,
-      [title, sourceType, metadata, file?.data ?? null, file?.mimeType ?? null]
+      [userId, title, sourceType, metadata, file?.data ?? null, file?.mimeType ?? null]
     );
     return rows[0];
   },
@@ -27,7 +28,6 @@ export const documentRepository = {
     documentId: string,
     chunks: Array<{ content: string; embedding: number[]; metadata?: Record<string, unknown> }>
   ): Promise<void> {
-    // Single multi-row INSERT rather than N round-trips.
     const values: unknown[] = [];
     const rowsSql: string[] = [];
 
@@ -45,55 +45,50 @@ export const documentRepository = {
   },
 
   async getLatestFileBySourceType(
-  sourceType: SourceType
+    userId: string,
+    sourceType: SourceType
   ): Promise<{ filename: string; mimeType: string; data: Buffer } | null> {
     const { rows } = await pool.query<{ title: string; mime_type: string | null; file_data: Buffer | null }>(
       `SELECT title, mime_type, file_data FROM documents
-      WHERE source_type = $1 AND file_data IS NOT NULL
+      WHERE user_id = $1 AND source_type = $2 AND file_data IS NOT NULL
       ORDER BY created_at DESC LIMIT 1`,
-      [sourceType]
+      [userId, sourceType]
     );
     const row = rows[0];
     if (!row || !row.file_data || !row.mime_type) return null;
     return { filename: row.title, mimeType: row.mime_type, data: row.file_data };
   },
 
-  /**
-   * Used by Gmail/Calendar ingestion to avoid re-embedding the same message
-   * or event on every sync. `externalId` is whatever ID the source system
-   * uses (Gmail message id, Calendar event id), stored in `metadata.externalId`.
-   */
-  async findByExternalId(sourceType: SourceType, externalId: string): Promise<DocumentRecord | null> {
+  async findByExternalId(userId: string, sourceType: SourceType, externalId: string): Promise<DocumentRecord | null> {
     const { rows } = await pool.query<DocumentRecord>(
       `SELECT id, title, source_type, metadata, created_at
        FROM documents
-       WHERE source_type = $1 AND metadata->>'externalId' = $2
+       WHERE user_id = $1 AND source_type = $2 AND metadata->>'externalId' = $3
        LIMIT 1`,
-      [sourceType, externalId]
+      [userId, sourceType, externalId]
     );
     return rows[0] ?? null;
   },
 
-  async deleteDocumentsBySourceType(sourceType: SourceType): Promise<void> {
-    // Used when re-uploading a CV: replace the old version rather than accumulate duplicates.
-    await pool.query(`DELETE FROM documents WHERE source_type = $1`, [sourceType]);
+  async deleteDocumentsBySourceType(userId: string, sourceType: SourceType): Promise<void> {
+    await pool.query(`DELETE FROM documents WHERE user_id = $1 AND source_type = $2`, [userId, sourceType]);
   },
 
-  /**
-   * Cosine similarity search using the HNSW index.
-   * `<=>` is pgvector's cosine-distance operator (0 = identical). We convert
-   * to a similarity score (1 - distance) so higher = more relevant, matching
-   * the RetrievedChunk contract used by the rest of the app.
-   */
-  async searchSimilarChunks(queryEmbedding: number[], topK: number = env.RAG_TOP_K): Promise<RetrievedChunk[]> {
+  async searchSimilarChunks(
+    userId: string,
+    queryEmbedding: number[],
+    topK: number = env.RAG_TOP_K
+  ): Promise<RetrievedChunk[]> {
     const { rows } = await pool.query(
       `SELECT
          c.id, c.document_id, c.chunk_index, c.content, c.metadata, c.created_at,
          1 - (c.embedding <=> $1) AS similarity
        FROM document_chunks c
+       JOIN documents d ON d.id = c.document_id
+       WHERE d.user_id = $2
        ORDER BY c.embedding <=> $1
-       LIMIT $2`,
-      [toVectorLiteral(queryEmbedding), topK]
+       LIMIT $3`,
+      [toVectorLiteral(queryEmbedding), userId, topK]
     );
     return rows as RetrievedChunk[];
   },

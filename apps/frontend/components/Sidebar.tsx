@@ -17,7 +17,10 @@ import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import { tokens } from "@/lib/theme";
 import { getGoogleStatus, GoogleStatus } from "@/lib/api/google";
+import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
+import Avatar from "@mui/material/Avatar";
 import type { ChatSession } from "@/lib/api/sessions";
+import { useAuth } from "@/lib/auth/AuthProvider";
 
 const NAV_ITEMS = [
   { href: "/", label: "Chat", icon: ChatBubbleRoundedIcon },
@@ -25,26 +28,27 @@ const NAV_ITEMS = [
 ];
 
 interface SidebarProps {
-  sessions: ChatSession[];
-  activeSessionId: string | null;
-  isLoadingSessions: boolean;
-  onSelectSession: (id: string) => void;
-  onNewChat: () => void;
-  onDeleteSession: (id: string) => void;
+  sessions?: ChatSession[];
+  activeSessionId?: string | null;
+  isLoadingSessions?: boolean;
+  onSelectSession?: (id: string) => void;
+  onNewChat?: () => void;
+  onDeleteSession?: (id: string) => void;
 }
 
 export default function Sidebar({
-  sessions,
-  activeSessionId,
-  isLoadingSessions,
-  onSelectSession,
-  onNewChat,
-  onDeleteSession,
-}: SidebarProps) {
+  sessions = [],
+  activeSessionId = null,
+  isLoadingSessions = false,
+  onSelectSession = () => {},
+  onNewChat = () => {},
+  onDeleteSession = () => {},
+}: SidebarProps = {}) {
   const pathname = usePathname();
   const [googleStatus, setGoogleStatus] = useState<GoogleStatus | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { user, logout } = useAuth();
 
   const loadStatus = useCallback(async () => {
     try {
@@ -281,6 +285,30 @@ export default function Sidebar({
           </Typography>
         </Stack>
       </Box>
+
+      <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", gap: 1, mt: 1, px: 1.25, py: 1, borderRadius: 2 }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center", minWidth: 0 }}>
+          <Avatar sx={{ width: 26, height: 26, fontSize: 12, fontWeight: 700, bgcolor: tokens.accentDim, color: tokens.accentBright }}>
+            {(user?.name || user?.email || "?").charAt(0).toUpperCase()}
+          </Avatar>
+          <Stack spacing={0} sx={{ minWidth: 0 }}>
+            <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: tokens.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {user?.name || user?.email}
+            </Typography>
+            {user?.name && (
+              <Typography sx={{ fontSize: 11, color: tokens.mutedDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {user.email}
+              </Typography>
+            )}
+          </Stack>
+        </Stack>
+        <Tooltip title="Log out">
+          <IconButton size="small" onClick={logout} sx={{ color: tokens.mutedDim, "&:hover": { color: tokens.danger } }}>
+            <LogoutRoundedIcon sx={{ fontSize: 17 }} />
+          </IconButton>
+        </Tooltip>
+      </Stack>
+
     </Box>
   );
 }

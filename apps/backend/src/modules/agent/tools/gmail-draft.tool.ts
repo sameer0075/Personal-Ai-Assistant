@@ -1,22 +1,19 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import type { RunnableConfig } from "@langchain/core/runnables";
 import { createEmailDraft } from "../../actions/pending-actions.service.js";
 
 export const gmailDraftMessageTool = tool(
-  async ({
-    to,
-    subject,
-    body,
-    cc,
-    attachCv,
-  }: {
-    to: string;
-    subject: string;
-    body: string;
-    cc?: string;
-    attachCv?: boolean;
-  }) => {
-    const action = await createEmailDraft({ to, subject, body, cc, attachCv });
+  async (
+    { to, subject, body, cc, attachCv }: { to: string; subject: string; body: string; cc?: string; attachCv?: boolean },
+    config?: RunnableConfig
+  ) => {
+    const userId: any = config?.configurable?.userId as string | undefined;
+    if (!userId) {
+      throw new Error("gmail_draft_message called without a userId in context - this is a bug, not a user-facing error.");
+    }
+
+    const action = await createEmailDraft(userId, { to, subject, body, cc, attachCv });
     return JSON.stringify({
       drafted: true,
       pendingActionId: action.id,
@@ -39,10 +36,7 @@ export const gmailDraftMessageTool = tool(
       subject: z.string().min(1).describe("Email subject line"),
       body: z.string().min(1).describe("Plain-text email body"),
       cc: z.string().email().optional().describe("Optional CC email address"),
-      attachCv: z
-        .boolean()
-        .optional()
-        .describe("Set true to attach the user's most recently uploaded CV file to this email"),
+      attachCv: z.boolean().optional().describe("Set true to attach the user's most recently uploaded CV file to this email"),
     }),
   }
 );

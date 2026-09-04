@@ -2,8 +2,10 @@ import { Router } from "express";
 import { z } from "zod";
 import { callMcpTool } from "../modules/mcp/mcp-client.service.js";
 import { syncCalendarToRag } from "../modules/rag/ingest-external.service.js";
+import { requireAuth } from "../modules/auth/auth.middleware.js";
 
 export const calendarRoutes = Router();
+calendarRoutes.use(requireAuth);
 
 const listQuerySchema = z.object({
   timeMin: z.string().datetime().optional(),
@@ -15,7 +17,7 @@ const listQuerySchema = z.object({
 calendarRoutes.get("/events", async (req, res) => {
   try {
     const { timeMin, timeMax, maxResults } = listQuerySchema.parse(req.query);
-    const json = await callMcpTool("calendar_list_events", { timeMin, timeMax, maxResults });
+    const json = await callMcpTool("calendar_list_events", { timeMin, timeMax, maxResults, userId: req.userId! });
     res.json(JSON.parse(json));
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to list events" });
@@ -35,7 +37,7 @@ const createEventSchema = z.object({
 calendarRoutes.post("/events", async (req, res) => {
   try {
     const input = createEventSchema.parse(req.body);
-    const json = await callMcpTool("calendar_create_event", input);
+    const json = await callMcpTool("calendar_create_event", { ...input, userId: req.userId! });
     res.status(201).json(JSON.parse(json));
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to create event" });
@@ -45,7 +47,7 @@ calendarRoutes.post("/events", async (req, res) => {
 /** DELETE /api/calendar/events/:id */
 calendarRoutes.delete("/events/:id", async (req, res) => {
   try {
-    await callMcpTool("calendar_delete_event", { eventId: req.params.id });
+    await callMcpTool("calendar_delete_event", { eventId: req.params.id, userId: req.userId! });
     res.status(204).end();
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to delete event" });
@@ -62,7 +64,7 @@ const syncSchema = z.object({
 calendarRoutes.post("/sync-to-rag", async (req, res) => {
   try {
     const input = syncSchema.parse(req.body);
-    const summary = await syncCalendarToRag(input);
+    const summary = await syncCalendarToRag(req.userId!, input);
     res.json(summary);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to sync Calendar to RAG" });

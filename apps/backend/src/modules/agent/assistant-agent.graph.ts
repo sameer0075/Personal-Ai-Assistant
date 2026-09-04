@@ -108,7 +108,7 @@ function extractToolCallTrace(messages: BaseMessage[]): ToolCallTrace[] {
 
 const DRAFT_TOOL_NAMES = new Set(["gmail_draft_message", "linkedin_draft_post"]);
 
-async function extractPendingActions(toolCalls: ToolCallTrace[]): Promise<PendingAction[]> {
+async function extractPendingActions(toolCalls: ToolCallTrace[], userId: string): Promise<PendingAction[]> {
   const ids = toolCalls
     .filter((call) => DRAFT_TOOL_NAMES.has(call.tool) && typeof call.output === "string")
     .map((call) => {
@@ -120,7 +120,7 @@ async function extractPendingActions(toolCalls: ToolCallTrace[]): Promise<Pendin
     })
     .filter((id): id is string => Boolean(id));
 
-  const actions = await Promise.all(ids.map((id) => getPendingAction(id)));
+  const actions = await Promise.all(ids.map((id) => getPendingAction(id, userId)));
   return actions.filter((a): a is PendingAction => a !== null);
 }
 
@@ -169,6 +169,7 @@ function chunkForDisplay(text: string): string[] {
 }
 
 export async function* streamAssistantAgent(
+  userId: string,
   question: string,
   history: Array<{ role: "user" | "assistant"; content: string }> = [],
   attachments?: ChatAttachment[]
@@ -215,7 +216,7 @@ export async function* streamAssistantAgent(
      * chunking the final (fully correct) answer - same fast "typing" feel,
      * correct tool-calling behavior underneath.
      */
-    const stream = await agent.stream({ messages: allMessages }, { streamMode: "updates" });
+    const stream = await agent.stream({ messages: allMessages }, { configurable: { userId }, streamMode: "updates" });
 
     for await (const update of stream) {
       // `update` is like `{ agent: { messages: [...] } }` or
@@ -252,7 +253,7 @@ export async function* streamAssistantAgent(
     }
 
     const toolCalls = extractToolCallTrace(allMessages);
-    const pendingActions = await extractPendingActions(toolCalls);
+    const pendingActions = await extractPendingActions(toolCalls, userId);
 
     yield { type: "done", data: { answer: finalAnswer, toolCalls, pendingActions } };
   } catch (err) {
@@ -262,11 +263,12 @@ export async function* streamAssistantAgent(
 
 /** Non-streaming convenience wrapper - drains streamAssistantAgent and returns the final payload. */
 export async function runAssistantAgent(
+  userId: string,
   question: string,
   history: Array<{ role: "user" | "assistant"; content: string }> = [],
   attachments?: ChatAttachment[]
 ): Promise<AssistantAnswer> {
-  for await (const event of streamAssistantAgent(question, history, attachments)) {
+  for await (const event of streamAssistantAgent(userId, question, history, attachments)) {
     if (event.type === "done") return event.data;
     if (event.type === "error") throw new Error(event.message);
   }
