@@ -128,24 +128,13 @@ async function consumeChatStream(res: Response, handlers: ChatStreamHandlers): P
   }
 }
 
-async function postStream(
-  path: string,
-  fields: Record<string, string | undefined>,
-  handlers: ChatStreamHandlers,
-  signal?: AbortSignal,
-  file?: File
-) {
-  const { body, headers: bodyHeaders } = buildChatBody(fields, file);
+/** Shared SSE fetch: adds the auth header, handles 401, then consumes frames. */
+async function streamFetch(path: string, init: RequestInit, handlers: ChatStreamHandlers): Promise<void> {
   const token = getToken();
-  const headers = new Headers(bodyHeaders);
+  const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    method: "POST",
-    headers,
-    body,
-    signal,
-  });
+  const res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, signal: init.signal });
 
   if (res.status === 401 && token) {
     clearToken();
@@ -160,6 +149,17 @@ async function postStream(
   }
 
   await consumeChatStream(res, handlers);
+}
+
+async function postStream(
+  path: string,
+  fields: Record<string, string | undefined>,
+  handlers: ChatStreamHandlers,
+  signal?: AbortSignal,
+  file?: File
+) {
+  const { body, headers: bodyHeaders } = buildChatBody(fields, file);
+  await streamFetch(path, { method: "POST", headers: bodyHeaders, body, signal }, handlers);
 }
 
 /**

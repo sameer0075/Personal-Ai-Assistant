@@ -24,6 +24,9 @@ import UploadFileRoundedIcon from "@mui/icons-material/UploadFileRounded";
 import AttachFileRoundedIcon from "@mui/icons-material/AttachFileRounded";
 import ArrowUpwardRoundedIcon from "@mui/icons-material/ArrowUpwardRounded";
 import MicNoneRoundedIcon from "@mui/icons-material/MicNoneRounded";
+import StopRoundedIcon from "@mui/icons-material/StopRounded";
+import VolumeUpRoundedIcon from "@mui/icons-material/VolumeUpRounded";
+import VolumeOffRoundedIcon from "@mui/icons-material/VolumeOffRounded";
 import SmartToyRoundedIcon from "@mui/icons-material/SmartToyRounded";
 import PersonRoundedIcon from "@mui/icons-material/PersonRounded";
 import DescriptionRoundedIcon from "@mui/icons-material/DescriptionRounded";
@@ -47,6 +50,10 @@ import { listSessions, getSessionMessages, deleteSession, type ChatSession } fro
 import Sidebar from "@/components/Sidebar";
 import ActionApprovalModal from "@/components/ActionApprovalModal";
 import RequireAuth from "@/lib/auth/RequireAuth";
+import ModeSwitch, { type AssistantMode } from "@/components/voice/ModeSwitch";
+import VoiceComposer from "@/components/voice/VoiceComposer";
+import { useSpeechToText } from "@/lib/useSpeechToText";
+import { speak, stopSpeaking, isSpeaking } from "@/lib/speech";
 
 interface Message {
   id?: string; // present once persisted - required to edit a message
@@ -108,6 +115,29 @@ function HomeContent() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Voice: input mode (voice-first vs keyboard), plus live dictation into the
+  // text composer. Refs mirror the state so the streaming handlers can read
+  // the *current* mode without going stale mid-stream.
+  const [mode, setMode] = useState<AssistantMode>("chat");
+  const [voiceMuted, setVoiceMuted] = useState(false);
+  const modeRef = useRef(mode);
+  const voiceMutedRef = useRef(voiceMuted);
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+  useEffect(() => {
+    voiceMutedRef.current = voiceMuted;
+  }, [voiceMuted]);
+  // Dropping out of voice mode (or muting) always kills any spoken reply.
+  useEffect(() => {
+    stopSpeaking();
+  }, [mode, voiceMuted]);
+
+  const dictation = useSpeechToText();
+  useEffect(() => {
+    if (dictation.listening && dictation.transcript) setQuestion(dictation.transcript);
+  }, [dictation.listening, dictation.transcript]);
 
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -178,6 +208,7 @@ function HomeContent() {
         }));
         setActiveSessionId(data.sessionId);
         refreshSessions();
+        if (modeRef.current === "voice" && !voiceMutedRef.current) speak(data.answer);
         onDone();
       },
       onError: (message: string) => {
@@ -201,12 +232,13 @@ function HomeContent() {
     e.target.value = "";
   }
 
-  async function handleAsk(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = question.trim();
-    if ((!trimmed && !attachedFile) || isAsking) return;
-
-    const fileToSend = attachedFile ?? undefined;
+  /**
+   * Sends a chat turn with the given text (typed, edited, or transcribed from
+   * voice) — the single path every input mode funnels through.
+   */
+  async function submitTurn(text: string, fileToSend?: File) {
+    const trimmed = text.trim();
+    if ((!trimmed && !fileToSend) || isAsking) return;
 
     setMessages((prev) => [
       ...prev,
@@ -236,6 +268,17 @@ function HomeContent() {
       appendAssistantTokenAndUpdateTool((m) => ({ ...m, content: message, isError: true, isStreaming: false }));
       setIsAsking(false);
     }
+  }
+
+  function handleAsk(e: React.FormEvent) {
+    e.preventDefault();
+    submitTurn(question, attachedFile ?? undefined);
+  }
+
+  function handleSwitchMode(next: AssistantMode) {
+    if (dictation.listening) dictation.stop();
+    stopSpeaking();
+    setMode(next);
   }
 
   /**
@@ -371,9 +414,13 @@ function HomeContent() {
             backdropFilter: "blur(10px)",
           }}
         >
-          <Typography sx={{ fontSize: 15, fontWeight: 600, color: tokens.text }}>
+          <Typography sx={{ fontSize: 15, fontWeight: 600, color: tokens.text, flexShrink: 0 }}>
             {messages.length === 0 ? "New Chat" : "Chat"}
           </Typography>
+
+          <Box sx={{ flex: 1, display: "flex", justifyContent: "center" }}>
+            <ModeSwitch mode={mode} onChange={handleSwitchMode} />
+          </Box>
 
           <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
             <input
@@ -455,15 +502,16 @@ function HomeContent() {
                   Hi, how can I help you today?
                 </Typography>
                 <Typography variant="body2" sx={{ color: tokens.muted, mb: 3.5, maxWidth: 380 }}>
-                  Upload your CV, connect Google under Integrations, and ask me to look things up, draft emails, or
-                  manage your calendar.
+                  {mode === "voice"
+                    ? "Tap the mic below and ask me anything. Just say what you need — no typing."
+                    : "Upload your CV, connect Google under Integrations, and ask me to look things up, draft emails, or manage your calendar."}
                 </Typography>
 
                 <Stack spacing={1.25} sx={{ width: "100%", maxWidth: 420 }}>
                   {SUGGESTIONS.map(({ icon: Icon, text }) => (
                     <Paper
                       key={text}
-                      onClick={() => handleSuggestionClick(text)}
+                      onClick={() => (mode === "voice" ? submitTurn(text) : handleSuggestionClick(text))}
                       elevation={0}
                       sx={{
                         display: "flex",
@@ -538,6 +586,20 @@ function HomeContent() {
         {/* Composer */}
         <Box sx={{ px: 3, pb: 3, pt: 1 }}>
           <Container maxWidth="md" disableGutters>
+            {mode === "voice" ? (
+              <VoiceComposer
+                disabled={isAsking}
+                muted={voiceMuted}
+                onToggleMute={() => {
+                  setVoiceMuted((muted) => {
+                    if (!muted) stopSpeaking();
+                    return !muted;
+                  });
+                }}
+                onSubmit={submitTurn}
+                onShowText={() => handleSwitchMode("chat")}
+              />
+            ) : (
             <Paper
               component="form"
               onSubmit={handleAsk}
@@ -599,10 +661,33 @@ function HomeContent() {
 
               <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", mt: 0.5 }}>
                 <Stack direction="row" spacing={0.25}>
-                  <Tooltip title="Voice input — coming soon">
+                  <Tooltip
+                    title={
+                      !dictation.supported
+                        ? "Voice input isn't supported in this browser"
+                        : dictation.listening
+                          ? "Stop listening"
+                          : "Speak instead of typing"
+                    }
+                  >
                     <span>
-                      <IconButton size="small" disabled sx={{ color: tokens.mutedDim }}>
-                        <MicNoneRoundedIcon sx={{ fontSize: 19 }} />
+                      <IconButton
+                        size="small"
+                        onClick={() => (dictation.listening ? dictation.stop() : dictation.start())}
+                        disabled={!dictation.supported || isAsking}
+                        sx={{
+                          border: `1px solid ${dictation.listening ? tokens.danger : tokens.border}`,
+                          borderRadius: 2,
+                          color: dictation.listening ? tokens.danger : tokens.muted,
+                          bgcolor: dictation.listening ? tokens.dangerDim : "transparent",
+                          animation: dictation.listening ? "micPulse 1.4s ease-out infinite" : undefined,
+                        }}
+                      >
+                        {dictation.listening ? (
+                          <StopRoundedIcon sx={{ fontSize: 18 }} />
+                        ) : (
+                          <MicNoneRoundedIcon sx={{ fontSize: 18 }} />
+                        )}
                       </IconButton>
                     </span>
                   </Tooltip>
@@ -645,6 +730,7 @@ function HomeContent() {
                 </Stack>
               </Stack>
             </Paper>
+            )}
             <Typography sx={{ fontSize: 11.5, color: tokens.mutedDim, textAlign: "center", mt: 1.25 }}>
               Works for you, grows with you
             </Typography>
@@ -689,6 +775,17 @@ function MessageBubble({
   const isUser = message.role === "user";
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
+  const [speaking, setSpeaking] = useState(false);
+
+  function toggleSpeak() {
+    if (speaking) {
+      stopSpeaking();
+      setSpeaking(false);
+    } else if (!isSpeaking()) {
+      setSpeaking(true);
+      speak(message.content, { onEnd: () => setSpeaking(false) });
+    }
+  }
 
   function startEdit() {
     setDraft(message.content);
@@ -969,6 +1066,27 @@ function MessageBubble({
               <span>
                 <IconButton size="small" onClick={startEdit} disabled={disabled} sx={{ color: tokens.mutedDim, p: 0.4 }}>
                   <EditRoundedIcon sx={{ fontSize: 13 }} />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
+        )}
+
+        {/* Read-aloud affordance for finished assistant messages */}
+        {!isUser && !message.isStreaming && !!message.content.trim() && (
+          <Stack direction="row" sx={{ px: 0.5 }}>
+            <Tooltip title={speaking ? "Stop reading" : "Read aloud"}>
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={toggleSpeak}
+                  sx={{ color: speaking ? tokens.accentBright : tokens.mutedDim, p: 0.4 }}
+                >
+                  {speaking ? (
+                    <VolumeOffRoundedIcon sx={{ fontSize: 13 }} />
+                  ) : (
+                    <VolumeUpRoundedIcon sx={{ fontSize: 13 }} />
+                  )}
                 </IconButton>
               </span>
             </Tooltip>
