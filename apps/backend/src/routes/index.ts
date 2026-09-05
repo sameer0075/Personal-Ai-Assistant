@@ -10,6 +10,7 @@ import { actionsRoutes } from "./actions.routes.js";
 import { sessionsRoutes } from "./sessions.routes.js";
 import { authRoutes } from "./auth.routes.js";
 import { agentsRoutes } from "./agents.routes.js";
+import { searchRoutes } from "./search.routes.js";
 
 export const apiRouter = Router();
 
@@ -24,3 +25,4 @@ apiRouter.use("/linkedin", linkedinRoutes);
 apiRouter.use("/actions", actionsRoutes);
 apiRouter.use("/sessions", sessionsRoutes);
 apiRouter.use("/agents", agentsRoutes);
+apiRouter.use("/search", searchRoutes);

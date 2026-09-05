@@ -12,6 +12,7 @@ import CircularProgress from "@mui/material/CircularProgress";
 import ChatBubbleRoundedIcon from "@mui/icons-material/ChatBubbleRounded";
 import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
 import HubRoundedIcon from "@mui/icons-material/HubRounded";
+import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
@@ -24,6 +25,7 @@ import { useAuth } from "@/lib/auth/AuthProvider";
 
 const NAV_ITEMS = [
   { href: "/", label: "Chat", icon: ChatBubbleRoundedIcon },
+  { href: "/search", label: "Search", icon: SearchRoundedIcon },
   { href: "/integrations", label: "Integrations", icon: HubRoundedIcon },
   { href: "/agents", label: "Agents", icon: AutoAwesomeRoundedIcon },
 ];

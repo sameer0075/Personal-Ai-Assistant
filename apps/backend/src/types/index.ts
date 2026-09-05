@@ -108,3 +108,51 @@ export interface AssistantAnswer {
   toolCalls: ToolCallTrace[];
   pendingActions: PendingAction[]
 }
+
+// ---------------------------------------------------------------------------
+// Unified search (module: search) — one query across chat history, documents,
+// and synced emails/events/posts, rather than only the agent's RAG lookup.
+// ---------------------------------------------------------------------------
+
+/**
+ * The corpora a unified search can surface a hit from. `chat` is direct chat
+ * message rows; `conversation` is chat turns that were indexed into RAG and
+ * match semantically; the rest map onto RAG chunks (email/calendar/linkedin/
+ * documents) plus the local linkedin_posts table.
+ */
+export type UnifiedSearchSource = "chat" | "conversation" | "email" | "calendar" | "linkedin" | "documents";
+
+export interface UnifiedSearchHit {
+  /** Stable id for React keys + dedup (message id, chunk id, or post id). */
+  id: string;
+  source: UnifiedSearchSource;
+  /** Human-friendly display title (chat session title, email subject, doc title…). */
+  title: string;
+  /** The searchable text this hit matched on (clients truncate/expand). */
+  snippet: string;
+  /** keyword = literal substring match; semantic = embedding similarity. */
+  matchedBy: "semantic" | "keyword";
+  /** Cosine similarity for semantic hits, null for keyword hits. */
+  similarity: number | null;
+  createdAt: string;
+  role?: "user" | "assistant";
+  sessionId?: string;
+  sessionTitle?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UnifiedSearchGroup {
+  source: UnifiedSearchSource;
+  /** Section heading, e.g. "Chat" / "Emails". */
+  label: string;
+  total: number;
+  hits: UnifiedSearchHit[];
+}
+
+export interface UnifiedSearchResult {
+  query: string;
+  tookMs: number;
+  /** The single strongest group, re-presented up top for at-a-glance answers. */
+  highlight: UnifiedSearchGroup | null;
+  groups: UnifiedSearchGroup[];
+}
