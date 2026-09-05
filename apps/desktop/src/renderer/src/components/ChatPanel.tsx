@@ -29,11 +29,13 @@ export interface ChatMessage {
 }
 
 interface ChatPanelProps {
-  projectId: string;
+  workspaceId: string;
   projectOpen: boolean;
-  /** Path of the file currently active in the editor, relative to the project root - or null if none. */
+  /** Number of repos in this workspace - shown so it's clear the chat spans the whole multi-root workspace. */
+  rootCount: number;
+  /** Path of the file currently active in the editor (prefixed, e.g. "frontend/src/App.tsx") - or null. */
   activePath: string | null;
-  /** Paths of every currently-open editor tab, relative to the project root. */
+  /** Paths of every currently-open editor tab (prefixed). */
   openPaths: string[];
 }
 
@@ -44,7 +46,7 @@ interface Message {
   isError?: boolean;
 }
 
-export default function ChatPanel({ projectId, projectOpen, activePath, openPaths }: ChatPanelProps) {
+export default function ChatPanel({ workspaceId, projectOpen, rootCount, activePath, openPaths }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [question, setQuestion] = useState("");
   const [isAsking, setIsAsking] = useState(false);
@@ -64,7 +66,7 @@ export default function ChatPanel({ projectId, projectOpen, activePath, openPath
     setIsAsking(true);
 
     try {
-      const result = await window.api.sendMessage(projectId, trimmed, {
+      const result = await window.api.sendMessage(workspaceId, trimmed, {
         activeFilePath: activePath,
         openFilePaths: openPaths,
       });
@@ -83,14 +85,14 @@ export default function ChatPanel({ projectId, projectOpen, activePath, openPath
     let cancelled = false;
 
     (async () => {
-      const history = await window.api.getChatHistory(projectId);
+      const history = await window.api.getChatHistory(workspaceId);
       if (!cancelled) setMessages(history);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [workspaceId]);
 
 return (
   <Box
@@ -136,13 +138,21 @@ return (
         CODING AGENT
       </Typography>
 
+      {projectOpen && rootCount > 1 && (
+        <Chip
+          size="small"
+          label={`${rootCount} repos`}
+          sx={{ height: 18, ml: 0.75, fontSize: 9.5, bgcolor: tokens.accentDim, color: tokens.accentBright, border: "none" }}
+        />
+      )}
+
       <Box sx={{ flex: 1 }} />
 
       <Chip
         size="small"
         label="Clear"
         onClick={async () => {
-          await window.api.clearChatHistory(projectId);
+          await window.api.clearChatHistory(workspaceId);
           setMessages([]);
         }}
         sx={{

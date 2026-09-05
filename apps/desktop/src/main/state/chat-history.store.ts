@@ -14,32 +14,33 @@ function historyDir(): string {
   return path.join(app.getPath("userData"), "chat-sessions");
 }
 
-// Keyed by project ROOT PATH, not projectId — projectId is a fresh
-// randomUUID every time a project is opened (see project-state.ts), so
-// keying by it would lose history the moment the app restarts. The root
-// path is the one thing that's stable across sessions for "the same project".
-function historyFile(projectRoot: string): string {
-  const hash = createHash("sha256").update(projectRoot).digest("hex").slice(0, 16);
+// Keyed by the workspace's stable "key" (the sorted list of all its root
+// paths) - NOT the workspace id, which is a fresh randomUUID every time a
+// workspace is opened (see project-state.ts). The root set is what's stable
+// across sessions for "the same project", so re-opening a folder (or adding a
+// repo to it) restores the right shared chat history.
+function historyFile(workspaceKey: string): string {
+  const hash = createHash("sha256").update(workspaceKey).digest("hex").slice(0, 16);
   return path.join(historyDir(), `${hash}.json`);
 }
 
-export async function loadChatHistory(projectRoot: string): Promise<StoredChatMessage[]> {
+export async function loadChatHistory(workspaceKey: string): Promise<StoredChatMessage[]> {
   try {
-    const raw = await fs.readFile(historyFile(projectRoot), "utf-8");
+    const raw = await fs.readFile(historyFile(workspaceKey), "utf-8");
     return JSON.parse(raw) as StoredChatMessage[];
   } catch {
-    return []; // no saved session for this project yet
+    return []; // no saved session for this workspace yet
   }
 }
 
-export async function saveChatHistory(projectRoot: string, messages: StoredChatMessage[]): Promise<void> {
+export async function saveChatHistory(workspaceKey: string, messages: StoredChatMessage[]): Promise<void> {
   await fs.mkdir(historyDir(), { recursive: true });
-  await fs.writeFile(historyFile(projectRoot), JSON.stringify(messages, null, 2), "utf-8");
+  await fs.writeFile(historyFile(workspaceKey), JSON.stringify(messages, null, 2), "utf-8");
 }
 
-export async function clearChatHistory(projectRoot: string): Promise<void> {
+export async function clearChatHistory(workspaceKey: string): Promise<void> {
   try {
-    await fs.unlink(historyFile(projectRoot));
+    await fs.unlink(historyFile(workspaceKey));
   } catch {
     // nothing to delete
   }

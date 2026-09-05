@@ -1,7 +1,7 @@
 import { tool } from "@langchain/core/tools";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { promises as fs } from "node:fs";
-import { listMcpToolsForProject, callMcpToolForProject } from "./mcp-client.service.js";
+import { listMcpToolsForWorkspace, callMcpToolForWorkspace } from "./mcp-client.service.js";
 import { mcpInputSchemaToZod } from "./mcp-schema-to-zod.js";
 import { requestApproval, type FileMutatingTool } from "../agent/approval-broker.js";
 import { FILE_MUTATING_TOOLS } from "../agent/mutating-tools.js";
@@ -15,9 +15,9 @@ const SUMMARY_BY_TOOL: Record<FileMutatingTool, (fileExists: boolean) => string>
 };
 
 /** Reads a file's raw current content for diffing, or null if it doesn't exist yet. */
-async function readCurrentContent(projectId: string, relativePath: string): Promise<string | null> {
+async function readCurrentContent(workspaceId: string, relativePath: string): Promise<string | null> {
   try {
-    return await fs.readFile(resolveUiSafePath(projectId, relativePath), "utf-8");
+    return await fs.readFile(resolveUiSafePath(workspaceId, relativePath), "utf-8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;
@@ -42,12 +42,12 @@ function previewEdit(before: string, oldStr: string, newStr: string): string | n
  * this is what makes AI-driven writes/edits/deletes safe to apply directly.
  */
 async function requestFileChangeApproval(
-  projectId: string,
+  workspaceId: string,
   toolName: FileMutatingTool,
   input: Record<string, unknown>
 ): Promise<boolean> {
   const path = typeof input.path === "string" ? input.path : "unknown";
-  const before = await readCurrentContent(projectId, path);
+  const before = await readCurrentContent(workspaceId, path);
 
   let after: string | null = null;
   if (toolName === "write_file" && typeof input.content === "string") {
@@ -57,7 +57,7 @@ async function requestFileChangeApproval(
   }
 
   return requestApproval({
-    projectId,
+    workspaceId,
     tool: toolName,
     path,
     before,
@@ -66,15 +66,15 @@ async function requestFileChangeApproval(
   });
 }
 
-export async function loadMcpToolsForProject(projectId: string): Promise<StructuredToolInterface[]> {
-  const mcpTools = await listMcpToolsForProject(projectId);
+export async function loadMcpToolsForWorkspace(workspaceId: string): Promise<StructuredToolInterface[]> {
+  const mcpTools = await listMcpToolsForWorkspace(workspaceId);
 
   return mcpTools.map((mcpTool) =>
     tool(
       async (input: unknown) => {
         if (FILE_MUTATING_TOOLS.has(mcpTool.name)) {
           const approved = await requestFileChangeApproval(
-            projectId,
+            workspaceId,
             mcpTool.name as FileMutatingTool,
             (input ?? {}) as Record<string, unknown>
           );
@@ -85,7 +85,7 @@ export async function loadMcpToolsForProject(projectId: string): Promise<Structu
             return `The user declined this ${mcpTool.name} action. Do not retry it without being asked again. Tell the user you were blocked and ask how they'd like to proceed.`;
           }
         }
-        return callMcpToolForProject(projectId, mcpTool.name, (input ?? {}) as Record<string, unknown>);
+        return callMcpToolForWorkspace(workspaceId, mcpTool.name, (input ?? {}) as Record<string, unknown>);
       },
       {
         name: mcpTool.name,

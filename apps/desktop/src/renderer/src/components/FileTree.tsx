@@ -9,6 +9,7 @@ import ChevronRightRoundedIcon from "@mui/icons-material/ChevronRightRounded";
 import FolderRoundedIcon from "@mui/icons-material/FolderRounded";
 import InsertDriveFileOutlinedIcon from "@mui/icons-material/InsertDriveFileOutlined";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
+import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import CodeRoundedIcon from "@mui/icons-material/CodeRounded";
 import JavascriptRoundedIcon from "@mui/icons-material/JavascriptRounded";
 import DataObjectRoundedIcon from "@mui/icons-material/DataObjectRounded";
@@ -28,20 +29,29 @@ interface DirectoryEntry {
   type: "file" | "directory";
 }
 
+interface WorkspaceRootInfo {
+  name: string;
+}
+
 interface FileTreeProps {
-  projectId: string;
+  workspaceId: string;
+  /** The workspace's roots (one top-level node each, e.g. "frontend", "backend"). */
+  roots: WorkspaceRootInfo[];
   activePath: string | null;
   onFileClick: (path: string) => void;
+  /** Removes a repo (root folder) from the workspace, keeping the shared chat. */
+  onRemoveRoot?: (workspaceId: string, rootName: string) => void;
 }
 
 interface FileTreeNodeProps {
-  projectId: string;
+  workspaceId: string;
   path: string;
   name: string;
   type: "file" | "directory";
   depth: number;
   activePath: string | null;
   onFileClick: (path: string) => void;
+  onRemoveRoot?: (workspaceId: string, rootName: string) => void;
 }
 
 function getFileIcon(name: string) {
@@ -168,13 +178,14 @@ function getFileIcon(name: string) {
 }
 
 function FileTreeNode({
-  projectId,
+  workspaceId,
   path,
   name,
   type,
   depth,
   activePath,
   onFileClick,
+  onRemoveRoot,
 }: FileTreeNodeProps) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] =
@@ -191,7 +202,7 @@ function FileTreeNode({
       setIsLoading(true);
 
       try {
-        const result = await window.api.readDirectory(projectId,path);
+        const result = await window.api.readDirectory(workspaceId, path);
         setChildren(result);
       } finally {
         setIsLoading(false);
@@ -228,6 +239,7 @@ function FileTreeNode({
 
           "&:hover": {
             bgcolor: tokens.hover,
+            "& .remove-repo-btn": { opacity: 1 },
           },
         }}
       >
@@ -280,6 +292,33 @@ function FileTreeNode({
           {name}
         </Typography>
 
+        {depth === 0 && type === "directory" && (
+          <Stack direction="row" sx={{ ml: "auto", pr: 1, alignItems: "center", gap: 0.5 }}>
+            <Typography sx={{ fontSize: 10, color: tokens.mutedDim }}>repo</Typography>
+            <CloseRoundedIcon
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onRemoveRoot) onRemoveRoot(workspaceId, name);
+              }}
+              sx={{
+                fontSize: 14,
+                color: tokens.muted,
+                opacity: 0,
+                cursor: "pointer",
+
+                "&:hover": {
+                  color: tokens.danger,
+                },
+              }}
+              className="remove-repo-btn"
+            />
+          </Stack>
+        )}
+
+        {!onRemoveRoot && (
+          <Typography sx={{ ml: "auto", pr: 1.5, fontSize: 10, color: tokens.mutedDim }}>repo</Typography>
+        )}
+
         {isLoading && (
           <CircularProgress
             size={10}
@@ -293,13 +332,14 @@ function FileTreeNode({
           {children.map((child) => (
             <FileTreeNode
               key={child.name}
-              projectId={projectId}
+              workspaceId={workspaceId}
               path={`${path === "." ? "" : `${path}/`}${child.name}`}
               name={child.name}
               type={child.type}
               depth={depth + 1}
               activePath={activePath}
               onFileClick={onFileClick}
+              onRemoveRoot={onRemoveRoot}
             />
           ))}
         </Box>
@@ -309,9 +349,11 @@ function FileTreeNode({
 }
 
 export default function FileTree({
-  projectId,
+  workspaceId,
+  roots,
   activePath,
   onFileClick,
+  onRemoveRoot,
 }: FileTreeProps) {
   return (
     <Box
@@ -363,18 +405,22 @@ export default function FileTree({
             color: tokens.text,
           }}
         >
-          PROJECT
+          WORKSPACE
         </Typography>
 
-        <FileTreeNode
-          path="."
-          projectId={projectId}
-          name="."
-          type="directory"
-          depth={0}
-          activePath={activePath}
-          onFileClick={onFileClick}
-        />
+        {roots.map((root) => (
+          <FileTreeNode
+            key={root.name}
+            path={root.name}
+            workspaceId={workspaceId}
+            name={root.name}
+            type="directory"
+            depth={0}
+            activePath={activePath}
+            onFileClick={onFileClick}
+            onRemoveRoot={onRemoveRoot}
+          />
+        ))}
       </Box>
     </Box>
   );

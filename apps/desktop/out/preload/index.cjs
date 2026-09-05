@@ -2,19 +2,21 @@
 const electron = require("electron");
 const api = {
   openFolder: () => electron.ipcRenderer.invoke("project:open-folder"),
+  addRootToWorkspace: (workspaceId) => electron.ipcRenderer.invoke("project:add-root", workspaceId),
+  removeRootFromWorkspace: (workspaceId, rootName) => electron.ipcRenderer.invoke("project:remove-root", workspaceId, rootName),
   listProjects: () => electron.ipcRenderer.invoke("project:list"),
   getActiveProject: () => electron.ipcRenderer.invoke("project:get-active"),
-  switchProject: (projectId) => electron.ipcRenderer.invoke("project:switch", projectId),
-  closeProject: (projectId) => electron.ipcRenderer.invoke("project:close", projectId),
-  readDirectory: (projectId, path) => electron.ipcRenderer.invoke("fs:read-directory", projectId, path),
-  readFile: (projectId, path) => electron.ipcRenderer.invoke("fs:read-file", projectId, path),
-  saveFile: (projectId, path, content) => electron.ipcRenderer.invoke("fs:save-file", projectId, path, content),
-  getChatHistory: (projectId) => electron.ipcRenderer.invoke("agent:get-history", projectId),
-  clearChatHistory: (projectId) => electron.ipcRenderer.invoke("agent:clear-history", projectId),
-  sendMessage: (projectId, message, context) => electron.ipcRenderer.invoke("agent:send-message", projectId, message, context),
-  /** Fires with the projectId whose files changed, so the renderer only refreshes that project's UI. */
+  switchProject: (workspaceId) => electron.ipcRenderer.invoke("project:switch", workspaceId),
+  closeProject: (workspaceId) => electron.ipcRenderer.invoke("project:close", workspaceId),
+  readDirectory: (workspaceId, path) => electron.ipcRenderer.invoke("fs:read-directory", workspaceId, path),
+  readFile: (workspaceId, path) => electron.ipcRenderer.invoke("fs:read-file", workspaceId, path),
+  saveFile: (workspaceId, path, content) => electron.ipcRenderer.invoke("fs:save-file", workspaceId, path, content),
+  getChatHistory: (workspaceId) => electron.ipcRenderer.invoke("agent:get-history", workspaceId),
+  clearChatHistory: (workspaceId) => electron.ipcRenderer.invoke("agent:clear-history", workspaceId),
+  sendMessage: (workspaceId, message, context) => electron.ipcRenderer.invoke("agent:send-message", workspaceId, message, context),
+  /** Fires with the workspaceId whose files changed, so the renderer only refreshes that workspace's UI. */
   onExternalFileChange: (callback) => {
-    const listener = (_event, projectId, paths) => callback(projectId, paths);
+    const listener = (_event, workspaceId, paths) => callback(workspaceId, paths);
     electron.ipcRenderer.on("fs:external-change", listener);
     return () => electron.ipcRenderer.removeListener("fs:external-change", listener);
   },

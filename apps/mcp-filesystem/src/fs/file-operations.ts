@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { env } from "../config/env.js";
 import { resolveSafePath, toProjectRelative } from "../security/path-guard.js";
 
 const IGNORE_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "out", "coverage", ".turbo", ".cache"]);
@@ -9,9 +10,17 @@ export interface DirectoryEntry {
   type: "file" | "directory";
 }
 
-export async function listDirectory(relativePath: string): Promise<DirectoryEntry[]> {
-  const target = resolveSafePath(relativePath);
-  const entries = await fs.readdir(target, { withFileTypes: true });
+/**
+ * Lists a directory inside a root (prefixed path, e.g. "frontend/src"), or all
+ * roots when given "." (virtual top level, one entry per workspace root).
+ */
+export async function listDirectory(prefixedPath: string): Promise<DirectoryEntry[]> {
+  if (prefixedPath === ".") {
+    return env.WORKSPACE_ROOTS.map((r) => ({ name: r.name, type: "directory" as const }));
+  }
+
+  const { abs } = resolveSafePath(prefixedPath);
+  const entries = await fs.readdir(abs, { withFileTypes: true });
 
   return entries
     .filter((e) => !IGNORE_DIRS.has(e.name))
@@ -25,9 +34,9 @@ export async function listDirectory(relativePath: string): Promise<DirectoryEntr
  * lines. The prefix is display-only - editFile's oldStr must NOT include it,
  * same caveat as any line-numbered view.
  */
-export async function readFile(relativePath: string): Promise<string> {
-  const target = resolveSafePath(relativePath);
-  const content = await fs.readFile(target, "utf-8");
+export async function readFile(prefixedPath: string): Promise<string> {
+  const { abs } = resolveSafePath(prefixedPath);
+  const content = await fs.readFile(abs, "utf-8");
 
   const lines = content.split("\n");
   const width = String(lines.length).length;
@@ -35,10 +44,10 @@ export async function readFile(relativePath: string): Promise<string> {
 }
 
 /** Creates or fully overwrites a file. Parent directories are created as needed. */
-export async function writeFile(relativePath: string, content: string): Promise<void> {
-  const target = resolveSafePath(relativePath);
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.writeFile(target, content, "utf-8");
+export async function writeFile(prefixedPath: string, content: string): Promise<void> {
+  const { abs } = resolveSafePath(prefixedPath);
+  await fs.mkdir(path.dirname(abs), { recursive: true });
+  await fs.writeFile(abs, content, "utf-8");
 }
 
 /**
@@ -48,33 +57,33 @@ export async function writeFile(relativePath: string, content: string): Promise<
  * matches rather than guessing, which is what makes AI-driven edits safe to
  * apply directly instead of requiring the model to regenerate the whole file.
  */
-export async function editFile(relativePath: string, oldStr: string, newStr: string): Promise<void> {
-  const target = resolveSafePath(relativePath);
-  const content = await fs.readFile(target, "utf-8");
+export async function editFile(prefixedPath: string, oldStr: string, newStr: string): Promise<void> {
+  const { abs, prefixed } = resolveSafePath(prefixedPath);
+  const content = await fs.readFile(abs, "utf-8");
 
   const occurrences = content.split(oldStr).length - 1;
 
   if (occurrences === 0) {
-    throw new Error(`oldStr not found in ${relativePath} - it must match the file's exact current content, verbatim.`);
+    throw new Error(`oldStr not found in ${prefixed} - it must match the file's exact current content, verbatim.`);
   }
   if (occurrences > 1) {
     throw new Error(
-      `oldStr appears ${occurrences} times in ${relativePath} - it must be unique. Include more surrounding context to disambiguate.`
+      `oldStr appears ${occurrences} times in ${prefixed} - it must be unique. Include more surrounding context to disambiguate.`
     );
   }
 
   const updated = content.replace(oldStr, newStr);
-  await fs.writeFile(target, updated, "utf-8");
+  await fs.writeFile(abs, updated, "utf-8");
 }
 
-export async function deleteFile(relativePath: string): Promise<void> {
-  const target = resolveSafePath(relativePath);
-  await fs.rm(target, { recursive: true, force: false });
+export async function deleteFile(prefixedPath: string): Promise<void> {
+  const { abs } = resolveSafePath(prefixedPath);
+  await fs.rm(abs, { recursive: true, force: false });
 }
 
-export async function createDirectory(relativePath: string): Promise<void> {
-  const target = resolveSafePath(relativePath);
-  await fs.mkdir(target, { recursive: true });
+export async function createDirectory(prefixedPath: string): Promise<void> {
+  const { abs } = resolveSafePath(prefixedPath);
+  await fs.mkdir(abs, { recursive: true });
 }
 
 export interface SearchMatch {
@@ -83,9 +92,9 @@ export interface SearchMatch {
   snippet: string;
 }
 
-/** Simple recursive substring search across text files - not regex, kept dependency-free and predictable. */
+/** Recursive substring search across text files - not regex, kept dependency-free and predictable. */
 export async function searchFiles(query: string, subPath = "."): Promise<SearchMatch[]> {
-  const root = resolveSafePath(subPath);
+  const roots = subPath === "." ? env.WORKSPACE_ROOTS.map((r) => r.root) : [resolveSafePath(subPath).abs];
   const matches: SearchMatch[] = [];
   const MAX_MATCHES = 100;
 
@@ -120,6 +129,6 @@ export async function searchFiles(query: string, subPath = "."): Promise<SearchM
     }
   }
 
-  await walk(root);
+  for (const root of roots) await walk(root);
   return matches;
 }

@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DirectoryEntry } from "../main/ipc/fs-ipc.js";
 import type { CodingAgentAnswer } from "../main/agent/coding-agent.graph.js";
-import type { ProjectInfo } from "../main/state/project-state.js";
+import type { WorkspaceInfo } from "../main/state/project-state.js";
 
 export interface AgentMessageContext {
   activeFilePath: string | null;
@@ -17,14 +17,14 @@ export interface StoredChatMessage {
 
 export interface ToolConfirmationRequest {
   requestId: string;
-  projectId: string;
+  workspaceId: string;
   tool: string;
   input: unknown;
 }
 
 export interface PendingFileChange {
   id: string;
-  projectId: string;
+  workspaceId: string;
   tool: "write_file" | "edit_file" | "delete_file" | "create_directory";
   path: string;
   before: string | null;
@@ -33,33 +33,37 @@ export interface PendingFileChange {
 }
 
 const api = {
-  openFolder: (): Promise<ProjectInfo | null> => ipcRenderer.invoke("project:open-folder"),
-  listProjects: (): Promise<ProjectInfo[]> => ipcRenderer.invoke("project:list"),
+  openFolder: (): Promise<WorkspaceInfo | null> => ipcRenderer.invoke("project:open-folder"),
+  addRootToWorkspace: (workspaceId: string): Promise<WorkspaceInfo> =>
+    ipcRenderer.invoke("project:add-root", workspaceId),
+  removeRootFromWorkspace: (workspaceId: string, rootName: string): Promise<WorkspaceInfo | null> =>
+    ipcRenderer.invoke("project:remove-root", workspaceId, rootName),
+  listProjects: (): Promise<WorkspaceInfo[]> => ipcRenderer.invoke("project:list"),
   getActiveProject: (): Promise<string | null> => ipcRenderer.invoke("project:get-active"),
-  switchProject: (projectId: string): Promise<void> => ipcRenderer.invoke("project:switch", projectId),
-  closeProject: (projectId: string): Promise<void> => ipcRenderer.invoke("project:close", projectId),
+  switchProject: (workspaceId: string): Promise<void> => ipcRenderer.invoke("project:switch", workspaceId),
+  closeProject: (workspaceId: string): Promise<void> => ipcRenderer.invoke("project:close", workspaceId),
 
-  readDirectory: (projectId: string, path: string): Promise<DirectoryEntry[]> =>
-    ipcRenderer.invoke("fs:read-directory", projectId, path),
-  readFile: (projectId: string, path: string): Promise<string> =>
-    ipcRenderer.invoke("fs:read-file", projectId, path),
-  saveFile: (projectId: string, path: string, content: string): Promise<void> =>
-    ipcRenderer.invoke("fs:save-file", projectId, path, content),
-  getChatHistory: (projectId: string): Promise<StoredChatMessage[]> =>
-    ipcRenderer.invoke("agent:get-history", projectId),
-  clearChatHistory: (projectId: string): Promise<void> =>
-    ipcRenderer.invoke("agent:clear-history", projectId),
+  readDirectory: (workspaceId: string, path: string): Promise<DirectoryEntry[]> =>
+    ipcRenderer.invoke("fs:read-directory", workspaceId, path),
+  readFile: (workspaceId: string, path: string): Promise<string> =>
+    ipcRenderer.invoke("fs:read-file", workspaceId, path),
+  saveFile: (workspaceId: string, path: string, content: string): Promise<void> =>
+    ipcRenderer.invoke("fs:save-file", workspaceId, path, content),
+  getChatHistory: (workspaceId: string): Promise<StoredChatMessage[]> =>
+    ipcRenderer.invoke("agent:get-history", workspaceId),
+  clearChatHistory: (workspaceId: string): Promise<void> =>
+    ipcRenderer.invoke("agent:clear-history", workspaceId),
 
   sendMessage: (
-    projectId: string,
+    workspaceId: string,
     message: string,
     context?: AgentMessageContext
-  ): Promise<CodingAgentAnswer> => ipcRenderer.invoke("agent:send-message", projectId, message, context),
+  ): Promise<CodingAgentAnswer> => ipcRenderer.invoke("agent:send-message", workspaceId, message, context),
 
-  /** Fires with the projectId whose files changed, so the renderer only refreshes that project's UI. */
-  onExternalFileChange: (callback: (projectId: string, paths: string[]) => void): (() => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, projectId: string, paths: string[]) =>
-      callback(projectId, paths);
+  /** Fires with the workspaceId whose files changed, so the renderer only refreshes that workspace's UI. */
+  onExternalFileChange: (callback: (workspaceId: string, paths: string[]) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, workspaceId: string, paths: string[]) =>
+      callback(workspaceId, paths);
     ipcRenderer.on("fs:external-change", listener);
     return () => ipcRenderer.removeListener("fs:external-change", listener);
   },

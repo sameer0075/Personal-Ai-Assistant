@@ -39,51 +39,119 @@ function setMainWindow(win) {
 function getMainWindow() {
   return mainWindow;
 }
-const projects = /* @__PURE__ */ new Map();
-let activeProjectId = null;
-function addProject(root) {
-  const existing = [...projects.values()].find((p) => p.root === root);
+const workspaces = /* @__PURE__ */ new Map();
+let activeWorkspaceId = null;
+function displayName(root) {
+  return path.basename(root) || root;
+}
+function workspaceKey(roots) {
+  return roots.map((r) => r.root).sort().join("\n");
+}
+function uniqueRootName(base, existing) {
+  const cleaned = (base || "repo").replace(/[^a-zA-Z0-9_-]/g, "-");
+  let candidate = cleaned;
+  let suffix = 2;
+  while (existing.some((r) => r.name === candidate)) {
+    candidate = `${cleaned}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+function findWorkspaceByRoot(root) {
+  return [...workspaces.values()].find((w) => w.roots.some((r) => r.root === root));
+}
+function createWorkspace(rootPath) {
+  const existing = findWorkspaceByRoot(rootPath);
   if (existing) {
-    activeProjectId = existing.id;
+    activeWorkspaceId = existing.id;
     return existing;
   }
-  const project = { id: randomUUID(), root, name: path.basename(root) };
-  projects.set(project.id, project);
-  activeProjectId = project.id;
-  return project;
+  const workspace = {
+    id: randomUUID(),
+    key: workspaceKey([{ name: uniqueRootName(displayName(rootPath), []), root: rootPath }]),
+    name: displayName(rootPath),
+    roots: [{ name: uniqueRootName(displayName(rootPath), []), root: rootPath }]
+  };
+  workspaces.set(workspace.id, workspace);
+  activeWorkspaceId = workspace.id;
+  return workspace;
 }
-function removeProject(id) {
-  projects.delete(id);
-  if (activeProjectId === id) {
-    const remaining = [...projects.keys()];
-    activeProjectId = remaining.length ? remaining[remaining.length - 1] : null;
+function addRootToWorkspace(workspaceId, rootPath) {
+  const workspace = workspaces.get(workspaceId);
+  if (!workspace) throw new Error(`Unknown workspace id "${workspaceId}"`);
+  if (workspace.roots.some((r) => r.root === rootPath)) {
+    activeWorkspaceId = workspace.id;
+    return workspace;
+  }
+  const other = findWorkspaceByRoot(rootPath);
+  if (other && other.id !== workspaceId) {
+    activeWorkspaceId = other.id;
+    throw new Error(`"${rootPath}" is already part of workspace "${other.name}".`);
+  }
+  workspace.roots = [
+    ...workspace.roots,
+    { name: uniqueRootName(displayName(rootPath), workspace.roots), root: rootPath }
+  ];
+  workspace.key = workspaceKey(workspace.roots);
+  activeWorkspaceId = workspace.id;
+  return workspace;
+}
+function removeWorkspace(id) {
+  workspaces.delete(id);
+  if (activeWorkspaceId === id) {
+    const remaining = [...workspaces.keys()];
+    activeWorkspaceId = remaining.length ? remaining[remaining.length - 1] : null;
   }
 }
-function setActiveProject(id) {
-  if (!projects.has(id)) throw new Error(`Unknown project id "${id}"`);
-  activeProjectId = id;
-}
-function getProject(id) {
-  return projects.get(id);
-}
-function getActiveProjectId() {
-  return activeProjectId;
-}
-function listProjects() {
-  return [...projects.values()];
-}
-function resolveUiSafePath(projectId, relativePath) {
-  const project = getProject(projectId);
-  if (!project) {
-    throw new Error(`Project "${projectId}" is not open`);
+function removeRootFromWorkspace(workspaceId, rootName) {
+  const workspace = workspaces.get(workspaceId);
+  if (!workspace) throw new Error(`Unknown workspace id "${workspaceId}"`);
+  if (workspace.roots.length <= 1) {
+    throw new Error(`Cannot remove the last repo from "${workspace.name}" - close the workspace instead.`);
   }
-  if (path.isAbsolute(relativePath)) {
-    throw new Error(`Path "${relativePath}" is absolute - all paths must be relative to the project root.`);
+  const remaining = workspace.roots.filter((r) => r.name !== rootName);
+  if (remaining.length === workspace.roots.length) throw new Error(`No repo named "${rootName}" in this workspace.`);
+  workspace.roots = remaining;
+  workspace.key = workspaceKey(workspace.roots);
+  return workspace;
+}
+function setActiveWorkspace(id) {
+  if (!workspaces.has(id)) throw new Error(`Unknown workspace id "${id}"`);
+  activeWorkspaceId = id;
+}
+function getWorkspace(id) {
+  return workspaces.get(id);
+}
+function getActiveWorkspaceId() {
+  return activeWorkspaceId;
+}
+function listWorkspaces() {
+  return [...workspaces.values()];
+}
+function resolveUiSafePath(workspaceId, prefixedPath) {
+  const workspace = getWorkspace(workspaceId);
+  if (!workspace) {
+    throw new Error(`Workspace "${workspaceId}" is not open`);
   }
-  const resolved = path.resolve(project.root, relativePath);
-  const isInsideRoot = resolved === project.root || resolved.startsWith(project.root + path.sep);
+  if (path.isAbsolute(prefixedPath)) {
+    throw new Error(
+      `Path "${prefixedPath}" is absolute - all paths must be prefixed with a workspace root name, e.g. "frontend/src/index.ts".`
+    );
+  }
+  const separator = prefixedPath.indexOf("/");
+  const rootName = separator <= 0 ? prefixedPath : prefixedPath.slice(0, separator);
+  const rel = separator <= 0 ? "" : prefixedPath.slice(separator + 1);
+  const root = workspace.roots.find((r) => r.name === rootName);
+  if (!root) {
+    const names = workspace.roots.map((r) => r.name).join(", ");
+    throw new Error(
+      `Unknown root "${rootName}" in workspace "${workspace.name}". Available roots: ${names}.`
+    );
+  }
+  const resolved = path.resolve(root.root, rel || ".");
+  const isInsideRoot = resolved === root.root || resolved.startsWith(root.root + path.sep);
   if (!isInsideRoot) {
-    throw new Error(`Path "${relativePath}" resolves outside project "${project.name}".`);
+    throw new Error(`Path "${prefixedPath}" resolves outside root "${root.name}".`);
   }
   return resolved;
 }
@@ -91,30 +159,38 @@ const IGNORE_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "bu
 function registerFsIpc() {
   ipcMain.handle(
     "fs:read-directory",
-    async (_event, projectId, relativePath) => {
-      const target = resolveUiSafePath(projectId, relativePath);
+    async (_event, workspaceId, prefixedPath) => {
+      if (prefixedPath === ".") {
+        const workspace = getWorkspace(workspaceId);
+        if (!workspace) return [];
+        return workspace.roots.map((r) => ({ name: r.name, type: "directory" }));
+      }
+      const target = resolveUiSafePath(workspaceId, prefixedPath);
       const entries = await promises.readdir(target, { withFileTypes: true });
       return entries.filter((e) => !IGNORE_DIRS.has(e.name)).map((e) => ({ name: e.name, type: e.isDirectory() ? "directory" : "file" })).sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "directory" ? -1 : 1);
     }
   );
-  ipcMain.handle("fs:read-file", async (_event, projectId, relativePath) => {
-    const target = resolveUiSafePath(projectId, relativePath);
+  ipcMain.handle("fs:read-file", async (_event, workspaceId, prefixedPath) => {
+    const target = resolveUiSafePath(workspaceId, prefixedPath);
     return promises.readFile(target, "utf-8");
   });
   ipcMain.handle(
     "fs:save-file",
-    async (_event, projectId, relativePath, content) => {
-      const target = resolveUiSafePath(projectId, relativePath);
+    async (_event, workspaceId, prefixedPath, content) => {
+      const target = resolveUiSafePath(workspaceId, prefixedPath);
       await promises.writeFile(target, content, "utf-8");
     }
   );
 }
 let webSearchServer = null;
 const filesystemServers = /* @__PURE__ */ new Map();
-const toolOwnerByProject = /* @__PURE__ */ new Map();
+const toolOwnerByWorkspace = /* @__PURE__ */ new Map();
 function requireEnv() {
   if (!env) throw new Error("Desktop app is misconfigured - check the .env file (GOOGLE_API_KEY, etc).");
   return env;
+}
+function encodeWorkspaceRoots(roots) {
+  return roots.map((r) => `${r.name}=${r.root}`).join("\n");
 }
 async function connectServer(id, command, args, extraEnv) {
   const client = new Client({ name: `personal-assistant-desktop-${id}`, version: "0.1.0" });
@@ -138,38 +214,42 @@ async function initStaticServers() {
     );
   }
 }
-async function connectProjectFilesystem(projectId, root) {
+async function connectWorkspaceFilesystem(workspaceId, roots) {
   const cfg = requireEnv();
-  if (filesystemServers.has(projectId)) return;
+  const existing = filesystemServers.get(workspaceId);
+  if (existing) {
+    await existing.client.close();
+    filesystemServers.delete(workspaceId);
+  }
   const server = await connectServer(
-    `filesystem-${projectId}`,
+    `filesystem-${workspaceId}`,
     cfg.MCP_FILESYSTEM_SERVER_COMMAND,
     cfg.MCP_FILESYSTEM_SERVER_ARGS.split(" ").filter(Boolean),
-    { PROJECT_ROOT: root }
+    { WORKSPACE_ROOTS: encodeWorkspaceRoots(roots) }
   );
-  filesystemServers.set(projectId, server);
-  await refreshToolOwnerMap(projectId);
+  filesystemServers.set(workspaceId, server);
+  await refreshToolOwnerMap(workspaceId);
 }
-async function disconnectProjectFilesystem(projectId) {
-  const server = filesystemServers.get(projectId);
+async function disconnectWorkspaceFilesystem(workspaceId) {
+  const server = filesystemServers.get(workspaceId);
   if (!server) return;
   await server.client.close();
-  filesystemServers.delete(projectId);
-  toolOwnerByProject.delete(projectId);
+  filesystemServers.delete(workspaceId);
+  toolOwnerByWorkspace.delete(workspaceId);
 }
-async function refreshToolOwnerMap(projectId) {
+async function refreshToolOwnerMap(workspaceId) {
   const map = /* @__PURE__ */ new Map();
-  const fsServer = filesystemServers.get(projectId);
+  const fsServer = filesystemServers.get(workspaceId);
   for (const server of [webSearchServer, fsServer]) {
     if (!server) continue;
     const { tools } = await server.client.listTools();
     for (const t of tools) map.set(t.name, server.client);
   }
-  toolOwnerByProject.set(projectId, map);
+  toolOwnerByWorkspace.set(workspaceId, map);
 }
-async function listMcpToolsForProject(projectId) {
+async function listMcpToolsForWorkspace(workspaceId) {
   const descriptors = [];
-  const fsServer = filesystemServers.get(projectId);
+  const fsServer = filesystemServers.get(workspaceId);
   for (const server of [webSearchServer, fsServer]) {
     if (!server) continue;
     const { tools } = await server.client.listTools();
@@ -177,12 +257,12 @@ async function listMcpToolsForProject(projectId) {
   }
   return descriptors;
 }
-async function callMcpToolForProject(projectId, name, args) {
-  const owners = toolOwnerByProject.get(projectId);
+async function callMcpToolForWorkspace(workspaceId, name, args) {
+  const owners = toolOwnerByWorkspace.get(workspaceId);
   const client = owners?.get(name);
   if (!client) {
     throw new Error(
-      `No connected MCP server exposes a tool named "${name}" for this project - is it open?`
+      `No connected MCP server exposes a tool named "${name}" for this workspace - is it open?`
     );
   }
   const result = await client.callTool({ name, arguments: args });
@@ -252,7 +332,7 @@ const pendingResolvers = /* @__PURE__ */ new Map();
 function requestApproval(change) {
   const id = randomUUID();
   return new Promise((resolve) => {
-    pendingResolvers.set(id, { projectId: change.projectId, resolve });
+    pendingResolvers.set(id, { workspaceId: change.workspaceId, resolve });
     getMainWindow()?.webContents.send("agent:pending-change", { ...change, id });
   });
 }
@@ -262,9 +342,9 @@ function resolvePendingChange(id, approved) {
   pendingResolvers.delete(id);
   resolver.resolve(approved);
 }
-function cancelPendingChangesForProject(projectId) {
+function cancelPendingChangesForWorkspace(workspaceId) {
   for (const [id, resolver] of pendingResolvers) {
-    if (resolver.projectId === projectId) {
+    if (resolver.workspaceId === workspaceId) {
       pendingResolvers.delete(id);
       resolver.resolve(false);
     }
@@ -277,9 +357,9 @@ const SUMMARY_BY_TOOL = {
   delete_file: () => "Delete",
   create_directory: () => "Create directory"
 };
-async function readCurrentContent(projectId, relativePath) {
+async function readCurrentContent(workspaceId, relativePath) {
   try {
-    return await promises.readFile(resolveUiSafePath(projectId, relativePath), "utf-8");
+    return await promises.readFile(resolveUiSafePath(workspaceId, relativePath), "utf-8");
   } catch (err) {
     if (err.code === "ENOENT") return null;
     throw err;
@@ -290,9 +370,9 @@ function previewEdit(before, oldStr, newStr) {
   if (occurrences !== 1) return null;
   return before.replace(oldStr, newStr);
 }
-async function requestFileChangeApproval(projectId, toolName, input) {
+async function requestFileChangeApproval(workspaceId, toolName, input) {
   const path2 = typeof input.path === "string" ? input.path : "unknown";
-  const before = await readCurrentContent(projectId, path2);
+  const before = await readCurrentContent(workspaceId, path2);
   let after = null;
   if (toolName === "write_file" && typeof input.content === "string") {
     after = input.content;
@@ -300,7 +380,7 @@ async function requestFileChangeApproval(projectId, toolName, input) {
     after = previewEdit(before, input.oldStr, input.newStr);
   }
   return requestApproval({
-    projectId,
+    workspaceId,
     tool: toolName,
     path: path2,
     before,
@@ -308,14 +388,14 @@ async function requestFileChangeApproval(projectId, toolName, input) {
     summary: SUMMARY_BY_TOOL[toolName](before !== null)
   });
 }
-async function loadMcpToolsForProject(projectId) {
-  const mcpTools = await listMcpToolsForProject(projectId);
+async function loadMcpToolsForWorkspace(workspaceId) {
+  const mcpTools = await listMcpToolsForWorkspace(workspaceId);
   return mcpTools.map(
     (mcpTool) => tool(
       async (input) => {
         if (FILE_MUTATING_TOOLS.has(mcpTool.name)) {
           const approved = await requestFileChangeApproval(
-            projectId,
+            workspaceId,
             mcpTool.name,
             input ?? {}
           );
@@ -323,7 +403,7 @@ async function loadMcpToolsForProject(projectId) {
             return `The user declined this ${mcpTool.name} action. Do not retry it without being asked again. Tell the user you were blocked and ask how they'd like to proceed.`;
           }
         }
-        return callMcpToolForProject(projectId, mcpTool.name, input ?? {});
+        return callMcpToolForWorkspace(workspaceId, mcpTool.name, input ?? {});
       },
       {
         name: mcpTool.name,
@@ -336,58 +416,78 @@ async function loadMcpToolsForProject(projectId) {
 function historyDir() {
   return path.join(app.getPath("userData"), "chat-sessions");
 }
-function historyFile(projectRoot) {
-  const hash = createHash("sha256").update(projectRoot).digest("hex").slice(0, 16);
+function historyFile(workspaceKey2) {
+  const hash = createHash("sha256").update(workspaceKey2).digest("hex").slice(0, 16);
   return path.join(historyDir(), `${hash}.json`);
 }
-async function loadChatHistory(projectRoot) {
+async function loadChatHistory(workspaceKey2) {
   try {
-    const raw = await promises.readFile(historyFile(projectRoot), "utf-8");
+    const raw = await promises.readFile(historyFile(workspaceKey2), "utf-8");
     return JSON.parse(raw);
   } catch {
     return [];
   }
 }
-async function saveChatHistory(projectRoot, messages) {
+async function saveChatHistory(workspaceKey2, messages) {
   await promises.mkdir(historyDir(), { recursive: true });
-  await promises.writeFile(historyFile(projectRoot), JSON.stringify(messages, null, 2), "utf-8");
+  await promises.writeFile(historyFile(workspaceKey2), JSON.stringify(messages, null, 2), "utf-8");
 }
-async function clearChatHistory(projectRoot) {
+async function clearChatHistory(workspaceKey2) {
   try {
-    await promises.unlink(historyFile(projectRoot));
+    await promises.unlink(historyFile(workspaceKey2));
   } catch {
   }
 }
 const SYSTEM_PROMPT = [
-  /* unchanged */
+  "You are a coding agent working inside a multi-root workspace. The workspace contains one or more",
+  "repositories, each addressed by its root name.",
+  "",
+  "EVERY file path you pass to the filesystem tools MUST be prefixed with the workspace root name,",
+  "e.g. 'frontend/src/App.tsx' or 'backend/src/api.ts'. Use list_directory with '.' to see the available",
+  "roots first if you're unsure. search_files spans all roots and reports prefixed paths, so use it to find",
+  "code across the whole workspace.",
+  "",
+  "You can freely read and edit files in ANY root of the workspace - they are all part of the same project",
+  "and the user expects you to look across them (e.g. change a frontend component and the backend API it",
+  "talks to in one turn). Only touch files inside the workspace roots.",
+  "",
+  // (behavioral rules unchanged from prior design)
+  "When you need to edit a file, read it first to see its exact current content, then use edit_file for",
+  "targeted changes (or write_file to create/overwrite). Explain what you changed and why."
 ].join("\n");
-const agentsByProject = /* @__PURE__ */ new Map();
+const agentsByWorkspace = /* @__PURE__ */ new Map();
 function toBaseMessages(display) {
   return display.map((m) => m.role === "user" ? new HumanMessage(m.content) : new AIMessage(m.content));
 }
-async function buildCodingAgentForProject(projectId, projectRoot) {
-  const mcpTools = await loadMcpToolsForProject(projectId);
+async function buildCodingAgentForWorkspace(spec) {
+  const mcpTools = await loadMcpToolsForWorkspace(spec.workspaceId);
   const agent = createReactAgent({ llm: createChatModel(), tools: mcpTools, prompt: SYSTEM_PROMPT });
-  const displayMessages = await loadChatHistory(projectRoot);
-  agentsByProject.set(projectId, {
+  const displayMessages = await loadChatHistory(spec.workspaceKey);
+  agentsByWorkspace.set(spec.workspaceId, {
     agent,
-    projectRoot,
+    workspaceKey: spec.workspaceKey,
+    workspaceName: spec.workspaceName,
+    roots: spec.roots,
     conversationHistory: toBaseMessages(displayMessages),
     displayMessages
   });
 }
-function disposeCodingAgentForProject(projectId) {
-  agentsByProject.delete(projectId);
+function disposeCodingAgentForWorkspace(workspaceId) {
+  agentsByWorkspace.delete(workspaceId);
 }
-function formatContext(context) {
-  if (!context) return "";
+function formatContext(state, context) {
   const lines = [];
-  if (context.activeFilePath) lines.push(`Active file (what the user is currently looking at): ${context.activeFilePath}`);
-  if (context.openFilePaths.length) lines.push(`Other open files: ${context.openFilePaths.join(", ")}`);
-  return lines.length ? `[Editor context]
+  lines.push(`Workspace roots: ${state.roots.join(", ")}`);
+  if (context?.activeFilePath) {
+    lines.push(`Active file (what the user is currently looking at): ${context.activeFilePath}`);
+  }
+  if (context?.openFilePaths.length) {
+    lines.push(`Other open files: ${context.openFilePaths.join(", ")}`);
+  }
+  return `[Editor context]
 ${lines.join("\n")}
 
-` : "";
+`;
 }
 function extractToolCallTrace(messages) {
   const trace = [];
@@ -407,13 +507,13 @@ function extractToolCallTrace(messages) {
   }
   return trace;
 }
-async function runCodingAgentForProject(projectId, message, context) {
-  const state = agentsByProject.get(projectId);
+async function runCodingAgentForWorkspace(workspaceId, message, context) {
+  const state = agentsByWorkspace.get(workspaceId);
   if (!state) {
-    throw new Error("This project's agent isn't ready yet - try reopening the folder.");
+    throw new Error("This workspace's agent isn't ready yet - try reopening the workspace.");
   }
   const previousLength = state.conversationHistory.length;
-  state.conversationHistory.push(new HumanMessage(formatContext(context) + message));
+  state.conversationHistory.push(new HumanMessage(formatContext(state, context) + message));
   const result = await state.agent.invoke({ messages: state.conversationHistory });
   state.conversationHistory = result.messages;
   const lastMessage = result.messages[result.messages.length - 1];
@@ -422,18 +522,18 @@ async function runCodingAgentForProject(projectId, message, context) {
   const toolCalls = extractToolCallTrace(newMessages);
   state.displayMessages.push({ role: "user", content: message });
   state.displayMessages.push({ role: "assistant", content: answer, toolCalls });
-  await saveChatHistory(state.projectRoot, state.displayMessages);
+  await saveChatHistory(state.workspaceKey, state.displayMessages);
   return { answer, toolCalls };
 }
-function getDisplayHistory(projectId) {
-  return agentsByProject.get(projectId)?.displayMessages ?? [];
+function getDisplayHistory(workspaceId) {
+  return agentsByWorkspace.get(workspaceId)?.displayMessages ?? [];
 }
-async function resetConversationForProject(projectId) {
-  const state = agentsByProject.get(projectId);
+async function resetConversationForWorkspace(workspaceId) {
+  const state = agentsByWorkspace.get(workspaceId);
   if (!state) return;
   state.conversationHistory = [];
   state.displayMessages = [];
-  await clearChatHistory(state.projectRoot);
+  await clearChatHistory(state.workspaceKey);
 }
 const pending = /* @__PURE__ */ new Map();
 function resolveToolConfirmation(requestId, approved) {
@@ -442,63 +542,104 @@ function resolveToolConfirmation(requestId, approved) {
   pending.delete(requestId);
   resolver.resolve(approved);
 }
-function cancelPendingConfirmationsForProject(projectId) {
+function cancelPendingConfirmationsForWorkspace(workspaceId) {
   for (const [requestId, resolver] of pending) {
-    if (resolver.projectId === projectId) {
+    if (resolver.workspaceId === workspaceId) {
       pending.delete(requestId);
       resolver.resolve(false);
     }
   }
 }
-function registerProjectIpc() {
-  ipcMain.handle("project:open-folder", async () => {
-    const win = getMainWindow();
-    if (!win) return null;
-    const result = await dialog.showOpenDialog(win, { properties: ["openDirectory"] });
-    if (result.canceled || result.filePaths.length === 0) return null;
-    return openProject(result.filePaths[0]);
+async function pickDirectory(prompt = "Select a folder") {
+  const win = getMainWindow();
+  if (!win) return null;
+  const result = await dialog.showOpenDialog(win, {
+    title: prompt,
+    properties: ["openDirectory"]
   });
-  ipcMain.handle("project:list", () => listProjects());
-  ipcMain.handle("project:get-active", () => getActiveProjectId());
-  ipcMain.handle("project:switch", (_event, projectId) => {
-    setActiveProject(projectId);
-  });
-  ipcMain.handle("project:close", async (_event, projectId) => {
-    cancelPendingConfirmationsForProject(projectId);
-    cancelPendingChangesForProject(projectId);
-    await disconnectProjectFilesystem(projectId);
-    disposeCodingAgentForProject(projectId);
-    removeProject(projectId);
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+}
+async function spinUpWorkspace(workspace) {
+  await connectWorkspaceFilesystem(workspace.id, workspace.roots);
+  await buildCodingAgentForWorkspace({
+    workspaceId: workspace.id,
+    workspaceKey: workspace.key,
+    workspaceName: workspace.name,
+    roots: workspace.roots.map((r) => r.name)
   });
 }
-async function openProject(root) {
-  const project = addProject(root);
-  await connectProjectFilesystem(project.id, project.root);
-  await buildCodingAgentForProject(project.id, project.root);
-  return project;
+function registerProjectIpc() {
+  ipcMain.handle("project:open-folder", async () => {
+    const root = await pickDirectory("Select a folder to open as a new workspace");
+    if (!root) return null;
+    const workspace = createWorkspace(root);
+    await spinUpWorkspace(workspace);
+    return workspace;
+  });
+  ipcMain.handle("project:add-root", async (_event, workspaceId) => {
+    const root = await pickDirectory("Select a repo folder to add to this workspace");
+    if (!root) return { ...getWorkspaceSafe(workspaceId) };
+    const workspace = addRootToWorkspace(workspaceId, root);
+    await spinUpWorkspace(workspace);
+    return workspace;
+  });
+  ipcMain.handle(
+    "project:remove-root",
+    async (_event, workspaceId, rootName) => {
+      const workspace = getWorkspaceSafe(workspaceId);
+      if (workspace.roots.length <= 1) {
+        await closeWorkspace(workspaceId);
+        return null;
+      }
+      const updated = removeRootFromWorkspace(workspaceId, rootName);
+      await spinUpWorkspace(updated);
+      return updated;
+    }
+  );
+  ipcMain.handle("project:list", () => listWorkspaces());
+  ipcMain.handle("project:get-active", () => getActiveWorkspaceId());
+  ipcMain.handle("project:switch", (_event, workspaceId) => {
+    setActiveWorkspace(workspaceId);
+  });
+  ipcMain.handle("project:close", async (_event, workspaceId) => {
+    await closeWorkspace(workspaceId);
+  });
+  async function closeWorkspace(workspaceId) {
+    cancelPendingConfirmationsForWorkspace(workspaceId);
+    cancelPendingChangesForWorkspace(workspaceId);
+    await disconnectWorkspaceFilesystem(workspaceId);
+    disposeCodingAgentForWorkspace(workspaceId);
+    removeWorkspace(workspaceId);
+  }
+  function getWorkspaceSafe(id) {
+    const ws = listWorkspaces().find((w) => w.id === id);
+    if (!ws) throw new Error("Workspace not found");
+    return ws;
+  }
 }
 function registerAgentIpc() {
   ipcMain.handle(
     "agent:send-message",
-    async (_event, projectId, message, context) => {
-      const result = await runCodingAgentForProject(projectId, message, context);
-      notifyOfFileChanges(projectId, result);
+    async (_event, workspaceId, message, context) => {
+      const result = await runCodingAgentForWorkspace(workspaceId, message, context);
+      notifyOfFileChanges(workspaceId, result);
       return result;
     }
   );
-  ipcMain.handle("agent:get-history", (_event, projectId) => getDisplayHistory(projectId));
-  ipcMain.handle("agent:clear-history", async (_event, projectId) => {
-    await resetConversationForProject(projectId);
+  ipcMain.handle("agent:get-history", (_event, workspaceId) => getDisplayHistory(workspaceId));
+  ipcMain.handle("agent:clear-history", async (_event, workspaceId) => {
+    await resetConversationForWorkspace(workspaceId);
   });
 }
-function notifyOfFileChanges(projectId, result) {
+function notifyOfFileChanges(workspaceId, result) {
   const win = getMainWindow();
   if (!win) return;
-  const project = getProject(projectId);
-  if (!project) return;
+  const workspace = getWorkspace(workspaceId);
+  if (!workspace) return;
   const changedPaths = result.toolCalls.filter((c) => FILE_MUTATING_TOOLS.has(c.tool)).map((c) => c.input?.path).filter((p) => Boolean(p));
   if (changedPaths.length) {
-    win.webContents.send("fs:external-change", projectId, changedPaths);
+    win.webContents.send("fs:external-change", workspaceId, changedPaths);
   }
 }
 function registerApprovalIpc() {

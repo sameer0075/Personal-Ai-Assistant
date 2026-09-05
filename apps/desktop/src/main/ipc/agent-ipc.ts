@@ -1,37 +1,37 @@
 import { ipcMain } from "electron";
 import {
-  runCodingAgentForProject,
+  runCodingAgentForWorkspace,
   getDisplayHistory,
-  resetConversationForProject,
+  resetConversationForWorkspace,
   type CodingAgentAnswer,
   type AgentMessageContext,
 } from "../agent/coding-agent.graph.js";
 import { getMainWindow } from "../state/window-state.js";
-import { getProject } from "../state/project-state.js";
+import { getWorkspace } from "../state/project-state.js";
 import { FILE_MUTATING_TOOLS } from "../agent/mutating-tools.js";
 
 export function registerAgentIpc(): void {
   ipcMain.handle(
     "agent:send-message",
-    async (_event, projectId: string, message: string, context?: AgentMessageContext): Promise<CodingAgentAnswer> => {
-      const result = await runCodingAgentForProject(projectId, message, context);
-      notifyOfFileChanges(projectId, result);
+    async (_event, workspaceId: string, message: string, context?: AgentMessageContext): Promise<CodingAgentAnswer> => {
+      const result = await runCodingAgentForWorkspace(workspaceId, message, context);
+      notifyOfFileChanges(workspaceId, result);
       return result;
     }
   );
 
-  ipcMain.handle("agent:get-history", (_event, projectId: string) => getDisplayHistory(projectId));
+  ipcMain.handle("agent:get-history", (_event, workspaceId: string) => getDisplayHistory(workspaceId));
 
-  ipcMain.handle("agent:clear-history", async (_event, projectId: string): Promise<void> => {
-    await resetConversationForProject(projectId);
+  ipcMain.handle("agent:clear-history", async (_event, workspaceId: string): Promise<void> => {
+    await resetConversationForWorkspace(workspaceId);
   });
 }
 
-function notifyOfFileChanges(projectId: string, result: CodingAgentAnswer): void {
+function notifyOfFileChanges(workspaceId: string, result: CodingAgentAnswer): void {
   const win = getMainWindow();
   if (!win) return;
-  const project = getProject(projectId);
-  if (!project) return;
+  const workspace = getWorkspace(workspaceId);
+  if (!workspace) return;
 
   const changedPaths = result.toolCalls
     .filter((c) => FILE_MUTATING_TOOLS.has(c.tool))
@@ -39,6 +39,6 @@ function notifyOfFileChanges(projectId: string, result: CodingAgentAnswer): void
     .filter((p): p is string => Boolean(p));
 
   if (changedPaths.length) {
-    win.webContents.send("fs:external-change", projectId, changedPaths);
+    win.webContents.send("fs:external-change", workspaceId, changedPaths);
   }
 }

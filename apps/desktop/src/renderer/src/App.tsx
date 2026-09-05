@@ -9,35 +9,40 @@ import FolderOpenRoundedIcon from "@mui/icons-material/FolderOpenRounded";
 import CodeRoundedIcon from "@mui/icons-material/CodeRounded";
 import FileTree from "./components/FileTree";
 import EditorPane, { type OpenTab } from "./components/EditorPane";
-import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
+import ChatPanel from "./components/ChatPanel";
 import ProjectSwitcher from "./components/ProjectSwitcher";
 import PendingChangeDialog, { type PendingFileChange } from "./components/PendingChangeDialog";
 
 import { tokens } from "./theme/theme";
 
-interface ProjectInfo {
-  id: string;
-  root: string;
+interface WorkspaceRoot {
   name: string;
+  root: string;
 }
 
-// Per-project UI state, so switching the active project preserves exactly
-// what you had open — same expectation as VS Code/Cursor workspaces.
-interface ProjectUiState {
+interface WorkspaceInfo {
+  id: string;
+  key: string;
+  name: string;
+  roots: WorkspaceRoot[];
+}
+
+// Per-workspace UI state, so switching workspace preserves exactly what you
+// had open — same expectation as VS Code/Cursor workspaces.
+interface WorkspaceUiState {
   tabs: OpenTab[];
   activePath: string | null;
   treeVersion: number;
-  messages: ChatMessage[];
 }
 
-function emptyUiState(): ProjectUiState {
-  return { tabs: [], activePath: null, treeVersion: 0, messages: [] };
+function emptyUiState(): WorkspaceUiState {
+  return { tabs: [], activePath: null, treeVersion: 0 };
 }
 
 export default function App() {
-  const [projects, setProjects] = useState<ProjectInfo[]>([]);
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [uiByProject, setUiByProject] = useState<Map<string, ProjectUiState>>(new Map());
+  const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [uiByWorkspace, setUiByWorkspace] = useState<Map<string, WorkspaceUiState>>(new Map());
   const [notice, setNotice] = useState<{ message: string; severity: "success" | "error" } | null>(null);
   // Every write_file/edit_file/delete_file/create_directory call the agent
   // makes waits here for a decision - queued FIFO in case several land
@@ -55,145 +60,167 @@ export default function App() {
     setPendingChanges((prev) => prev.filter((c) => c.id !== id));
   }
 
-  const activeUi = activeProjectId ? uiByProject.get(activeProjectId) ?? emptyUiState() : null;
+  const activeUi = activeWorkspaceId ? uiByWorkspace.get(activeWorkspaceId) ?? emptyUiState() : null;
 
-  function updateUi(projectId: string, patch: Partial<ProjectUiState>) {
-    setUiByProject((prev) => {
+  function updateUi(workspaceId: string, patch: Partial<WorkspaceUiState>) {
+    setUiByWorkspace((prev) => {
       const next = new Map(prev);
-      const current = next.get(projectId) ?? emptyUiState();
-      next.set(projectId, { ...current, ...patch });
+      const current = next.get(workspaceId) ?? emptyUiState();
+      next.set(workspaceId, { ...current, ...patch });
       return next;
     });
   }
 
-  // Pick up already-open projects if the window reloads mid-session.
+  // Pick up already-open workspaces if the window reloads mid-session.
   useEffect(() => {
     (async () => {
       const [list, active] = await Promise.all([window.api.listProjects(), window.api.getActiveProject()]);
-      setProjects(list);
-      setActiveProjectId(active);
-      setUiByProject(new Map(list.map((p) => [p.id, emptyUiState()])));
+      setWorkspaces(list);
+      setActiveWorkspaceId(active);
+      setUiByWorkspace(new Map(list.map((w) => [w.id, emptyUiState()])));
     })();
   }, []);
 
   async function handleOpenFolder() {
-    const project = await window.api.openFolder();
-    if (!project) return;
+    const workspace = await window.api.openFolder();
+    if (!workspace) return;
 
-    setProjects((prev) => (prev.some((p) => p.id === project.id) ? prev : [...prev, project]));
-    setUiByProject((prev) => (prev.has(project.id) ? prev : new Map(prev).set(project.id, emptyUiState())));
-    setActiveProjectId(project.id);
+    setWorkspaces((prev) => (prev.some((w) => w.id === workspace.id) ? prev : [...prev, workspace]));
+    setUiByWorkspace((prev) => (prev.has(workspace.id) ? prev : new Map(prev).set(workspace.id, emptyUiState())));
+    setActiveWorkspaceId(workspace.id);
   }
 
-  async function handleSwitchProject(projectId: string) {
-    await window.api.switchProject(projectId);
-    setActiveProjectId(projectId);
+  /** Adds another repo to a workspace so they share one chat (Cursor-style). */
+  async function handleAddRepo(workspaceId: string) {
+    const workspace = await window.api.addRootToWorkspace(workspaceId);
+    if (!workspace) return;
+    setWorkspaces((prev) => prev.map((w) => (w.id === workspace.id ? workspace : w)));
+    setUiByWorkspace((prev) => (prev.has(workspace.id) ? prev : new Map(prev).set(workspace.id, emptyUiState())));
+    setActiveWorkspaceId(workspace.id);
   }
 
-  async function handleCloseProject(projectId: string) {
-    await window.api.closeProject(projectId);
-    setProjects((prev) => prev.filter((p) => p.id !== projectId));
-    setUiByProject((prev) => {
+  async function handleSwitchWorkspace(workspaceId: string) {
+    await window.api.switchProject(workspaceId);
+    setActiveWorkspaceId(workspaceId);
+  }
+
+  async function handleCloseWorkspace(workspaceId: string) {
+    await window.api.closeProject(workspaceId);
+    setWorkspaces((prev) => prev.filter((w) => w.id !== workspaceId));
+    setUiByWorkspace((prev) => {
       const next = new Map(prev);
-      next.delete(projectId);
+      next.delete(workspaceId);
       return next;
     });
-    if (activeProjectId === projectId) {
-      const remaining = projects.filter((p) => p.id !== projectId);
+    if (activeWorkspaceId === workspaceId) {
+      const remaining = workspaces.filter((w) => w.id !== workspaceId);
       const nextActive = remaining.length ? remaining[remaining.length - 1].id : null;
-      setActiveProjectId(nextActive);
+      setActiveWorkspaceId(nextActive);
       if (nextActive) await window.api.switchProject(nextActive);
     }
   }
 
+  /** Removes a repo from a workspace; if it was the last repo the whole workspace closes. */
+  async function handleRemoveRepo(workspaceId: string, rootName: string) {
+    const result = await window.api.removeRootFromWorkspace(workspaceId, rootName);
+
+    if (result === null) {
+      await handleCloseWorkspace(workspaceId);
+      return;
+    }
+
+    setWorkspaces((prev) => prev.map((w) => (w.id === result.id ? result : w)));
+
+    // Drop open tabs + active file that belonged to the removed repo.
+    setUiByWorkspace((prev) => {
+      const ui = prev.get(workspaceId);
+      if (!ui) return prev;
+      const inRoot = (p: string) => p === rootName || p.startsWith(`${rootName}/`);
+      const tabs = ui.tabs.filter((t) => !inRoot(t.path));
+      const activePath =
+        ui.activePath && inRoot(ui.activePath) ? (tabs.length ? tabs[tabs.length - 1].path : null) : ui.activePath;
+      const next = new Map(prev);
+      next.set(workspaceId, { ...ui, tabs, activePath, treeVersion: ui.treeVersion + 1 });
+      return next;
+    });
+  }
+
   const openFile = useCallback(
     async (path: string) => {
-      if (!activeProjectId || !activeUi) return;
-      updateUi(activeProjectId, { activePath: path });
+      if (!activeWorkspaceId || !activeUi) return;
+      updateUi(activeWorkspaceId, { activePath: path });
       if (activeUi.tabs.some((t) => t.path === path)) return;
 
       try {
-        const content = await window.api.readFile(activeProjectId, path);
-        updateUi(activeProjectId, { tabs: [...activeUi.tabs, { path, content, isDirty: false }] });
+        const content = await window.api.readFile(activeWorkspaceId, path);
+        updateUi(activeWorkspaceId, { tabs: [...activeUi.tabs, { path, content, isDirty: false }] });
       } catch (err) {
         setNotice({ message: err instanceof Error ? err.message : "Failed to open file", severity: "error" });
       }
     },
-    [activeProjectId, activeUi]
+    [activeWorkspaceId, activeUi]
   );
 
   function closeTab(path: string) {
-    if (!activeProjectId || !activeUi) return;
+    if (!activeWorkspaceId || !activeUi) return;
     const tabs = activeUi.tabs.filter((t) => t.path !== path);
     const activePath = activeUi.activePath === path ? (tabs.length ? tabs[tabs.length - 1].path : null) : activeUi.activePath;
-    updateUi(activeProjectId, { tabs, activePath });
+    updateUi(activeWorkspaceId, { tabs, activePath });
   }
 
   function updateContent(path: string, content: string) {
-    if (!activeProjectId || !activeUi) return;
+    if (!activeWorkspaceId || !activeUi) return;
     const tabs = activeUi.tabs.map((t) => (t.path === path ? { ...t, content, isDirty: true } : t));
-    updateUi(activeProjectId, { tabs });
+    updateUi(activeWorkspaceId, { tabs });
   }
 
   const saveFile = useCallback(
     async (path: string) => {
-      if (!activeProjectId || !activeUi) return;
+      if (!activeWorkspaceId || !activeUi) return;
       const tab = activeUi.tabs.find((t) => t.path === path);
       if (!tab) return;
       try {
-        await window.api.saveFile(activeProjectId, path, tab.content);
-        updateUi(activeProjectId, {
+        await window.api.saveFile(activeWorkspaceId, path, tab.content);
+        updateUi(activeWorkspaceId, {
           tabs: activeUi.tabs.map((t) => (t.path === path ? { ...t, isDirty: false } : t)),
         });
       } catch (err) {
         setNotice({ message: err instanceof Error ? err.message : "Failed to save file", severity: "error" });
       }
     },
-    [activeProjectId, activeUi]
+    [activeWorkspaceId, activeUi]
   );
 
-  const sendMessage = useCallback(
-    async (message: string) => {
-      if (!activeProjectId) return;
-      const userMsg: ChatMessage = { role: "user", content: message };
-      const current = uiByProject.get(activeProjectId) ?? emptyUiState();
-      updateUi(activeProjectId, { messages: [...current.messages, userMsg] });
-
-      const result = await window.api.sendMessage(activeProjectId, message);
-      const latest = uiByProject.get(activeProjectId) ?? current;
-      updateUi(activeProjectId, {
-        messages: [...latest.messages, userMsg, { role: "assistant", content: result.answer, toolCalls: result.toolCalls }],
-      });
-    },
-    [activeProjectId, uiByProject]
-  );
-
-  // The agent edits files through a separate process (a project-scoped MCP
-  // server) — route the refresh only to the project that actually changed.
+  // The agent edits files through a separate process (a workspace-scoped MCP
+  // server) — route the refresh only to the workspace that actually changed.
   useEffect(() => {
-    return window.api.onExternalFileChange(async (projectId, paths) => {
-      const ui = uiByProject.get(projectId);
+    return window.api.onExternalFileChange(async (workspaceId, paths) => {
+      const ui = uiByWorkspace.get(workspaceId);
       if (!ui) return;
 
       let tabs = ui.tabs;
       for (const path of paths) {
         if (!tabs.some((t) => t.path === path)) continue;
         try {
-          const content = await window.api.readFile(projectId, path);
+          const content = await window.api.readFile(workspaceId, path);
           tabs = tabs.map((t) => (t.path === path ? { ...t, content, isDirty: false } : t));
         } catch {
           // file may have been deleted by the agent - leave the tab as-is.
         }
       }
-      updateUi(projectId, { tabs, treeVersion: ui.treeVersion + 1 });
+      updateUi(workspaceId, { tabs, treeVersion: ui.treeVersion + 1 });
     });
-  }, [uiByProject]);
+  }, [uiByWorkspace]);
 
-  if (!activeProjectId || !activeUi) {
+  const activeWorkspace = activeWorkspaceId ? workspaces.find((w) => w.id === activeWorkspaceId) : null;
+  const activePath = activeUi?.activePath ?? null;
+  const openPaths = activeUi?.tabs.map((t) => t.path) ?? [];
+
+  if (!activeWorkspaceId || !activeWorkspace || !activeUi) {
     return (
       <Box sx={{ height: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, bgcolor: tokens.bg }}>
         <CodeRoundedIcon sx={{ fontSize: 40, color: tokens.accentBright }} />
-        <Typography sx={{ fontSize: 15, color: tokens.text }}>No project open</Typography>
+        <Typography sx={{ fontSize: 15, color: tokens.text }}>No workspace open</Typography>
         <Button
           variant="contained"
           startIcon={<FolderOpenRoundedIcon />}
@@ -209,46 +236,53 @@ export default function App() {
   return (
     <Box sx={{ height: "100vh", display: "flex", bgcolor: tokens.bg }}>
       <ProjectSwitcher
-        projects={projects}
-        activeProjectId={activeProjectId}
-        onSwitch={handleSwitchProject}
-        onClose={handleCloseProject}
-        onAddFolder={handleOpenFolder}
+        workspaces={workspaces}
+        activeWorkspaceId={activeWorkspaceId}
+        onSwitch={handleSwitchWorkspace}
+        onClose={handleCloseWorkspace}
+        onAddWorkspace={handleOpenFolder}
+        onAddRepoToActive={handleAddRepo}
       />
 
       <Box sx={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <Stack direction="row" sx={{ alignItems: "center", gap: 1, px: 2, py: 1, borderBottom: `1px solid ${tokens.border}` }}>
           <CodeRoundedIcon sx={{ fontSize: 16, color: tokens.accentBright }} />
-          <Typography sx={{ fontSize: 12.5, color: tokens.muted, fontFamily: "monospace" }}>
-            {projects.find((p) => p.id === activeProjectId)?.root}
+          <Typography sx={{ fontSize: 12.5, fontWeight: 600, color: tokens.text }}>
+            {activeWorkspace.roots.map((r) => r.name).join(" + ")}
           </Typography>
+          {activeWorkspace.roots.length > 1 && (
+            <ChipLabel label={`${activeWorkspace.roots.length} repos`} />
+          )}
         </Stack>
 
         <Box sx={{ flex: 1, display: "flex", minHeight: 0 }}>
           <Box sx={{ width: 240, flexShrink: 0, borderRight: `1px solid ${tokens.border}` }}>
             <FileTree
-              key={`${activeProjectId}-${activeUi.treeVersion}`}
-              projectId={activeProjectId}
-              activePath={activeUi.activePath}
+              key={`${activeWorkspaceId}-${activeUi.treeVersion}`}
+              workspaceId={activeWorkspaceId}
+              roots={activeWorkspace.roots}
+              activePath={activePath}
               onFileClick={openFile}
+              onRemoveRoot={handleRemoveRepo}
             />
           </Box>
 
           <EditorPane
             tabs={activeUi.tabs}
-            activePath={activeUi.activePath}
-            onSelectTab={(path) => updateUi(activeProjectId, { activePath: path })}
+            activePath={activePath}
+            onSelectTab={(path) => updateUi(activeWorkspaceId, { activePath: path })}
             onCloseTab={closeTab}
             onContentChange={updateContent}
             onSave={saveFile}
           />
 
           <ChatPanel
-            key={activeProjectId}
-            projectId={activeProjectId}
-            projectOpen={Boolean(activeProjectId)}
-            activePath={activeUi.activePath}
-            openPaths={activeUi.tabs.map((t) => t.path)}
+            key={activeWorkspaceId}
+            workspaceId={activeWorkspaceId}
+            projectOpen={Boolean(activeWorkspaceId)}
+            rootCount={activeWorkspace.roots.length}
+            activePath={activePath}
+            openPaths={openPaths}
           />
         </Box>
       </Box>
@@ -262,8 +296,8 @@ export default function App() {
       </Snackbar>
 
       {(() => {
-        const projectChanges = pendingChanges.filter((c) => c.projectId === activeProjectId);
-        const [current, ...rest] = projectChanges;
+        const workspaceChanges = pendingChanges.filter((c) => c.workspaceId === activeWorkspaceId);
+        const [current, ...rest] = workspaceChanges;
         if (!current) return null;
         return (
           <PendingChangeDialog
@@ -274,5 +308,22 @@ export default function App() {
         );
       })()}
     </Box>
+  );
+}
+
+function ChipLabel({ label }: { label: string }) {
+  return (
+    <Typography
+      sx={{
+        fontSize: 10,
+        px: 0.75,
+        py: 0.25,
+        borderRadius: 1,
+        bgcolor: tokens.accentDim,
+        color: tokens.accentBright,
+      }}
+    >
+      {label}
+    </Typography>
   );
 }
