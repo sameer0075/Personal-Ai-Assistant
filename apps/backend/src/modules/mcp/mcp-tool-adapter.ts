@@ -3,17 +3,21 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 import { listMcpTools, callMcpTool } from "./mcp-client.service.js";
 import { mcpInputSchemaToZod } from "./mcp-schema-to-zod.js";
 
-// Tools that really send/publish something must only ever run through the
-// app's human-approval queue (approved via the UI) - never directly by a model.
-// They are excluded here, so no agent of any kind gets them.
-const ACTIONS_REQUIRING_APPROVAL = new Set([
+// Tools the agent must NEVER call directly: anything that really sends/publishes
+// something must go through the app's human-approval queue, and destructive
+// actions like deleting a LinkedIn post are only reachable via user-initiated
+// features (the profile panels), not from a model turn. Excluding them here
+// means no agent of any kind gets them.
+const AGENT_FORBIDDEN_TOOLS = new Set([
   "gmail_send_message",
   "gmail_send_bulk",
   "linkedin_create_post",
+  "linkedin_delete_post",
+  "whatsapp_send_message",
 ]);
 
 /**
- * Loads every MCP tool (minus the approval-only ones above) as a LangChain
+ * Loads every MCP tool (minus the forbidden ones above) as a LangChain
  * tool, keyed by tool name. Specialist agents pick the subset they own.
  */
 export async function loadMcpToolsByName(): Promise<Record<string, StructuredToolInterface>> {
@@ -21,7 +25,7 @@ export async function loadMcpToolsByName(): Promise<Record<string, StructuredToo
   const out: Record<string, StructuredToolInterface> = {};
 
   for (const mcpTool of mcpTools) {
-    if (ACTIONS_REQUIRING_APPROVAL.has(mcpTool.name)) continue;
+    if (AGENT_FORBIDDEN_TOOLS.has(mcpTool.name)) continue;
     out[mcpTool.name] = tool(
       async (input: unknown, config?: RunnableConfig) => {
         const userId = config?.configurable?.userId as string | undefined;

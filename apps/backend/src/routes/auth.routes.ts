@@ -2,17 +2,19 @@ import { Router } from "express";
 import { z } from "zod";
 import { signup, login, getUserById } from "../modules/auth/auth.service.js";
 import { requireAuth } from "../modules/auth/auth.middleware.js";
+import { rateLimit } from "../modules/security/rate-limit.js";
 
 export const authRoutes = Router();
 
 const signupSchema = z.object({
   email: z.string().trim().email("Enter a valid email address"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  // Cap length - bcrypt only uses the first 72 bytes, and an unbounded string is a cheap DoS.
+  password: z.string().min(8, "Password must be at least 8 characters").max(128, "Password is too long"),
   name: z.string().trim().min(1).max(120).optional(),
 });
 
 /** POST /api/auth/signup - Body: { email, password, name? }. Returns { token, user }. */
-authRoutes.post("/signup", async (req, res) => {
+authRoutes.post("/signup", rateLimit({ max: 10 }), async (req, res) => {
   try {
     const { email, password, name } = signupSchema.parse(req.body);
     const result = await signup(email, password, name);
@@ -32,7 +34,7 @@ const loginSchema = z.object({
 });
 
 /** POST /api/auth/login - Body: { email, password }. Returns { token, user }. */
-authRoutes.post("/login", async (req, res) => {
+authRoutes.post("/login", rateLimit({ max: 20 }), async (req, res) => {
   try {
     const { email, password } = loginSchema.parse(req.body);
     const result = await login(email, password);

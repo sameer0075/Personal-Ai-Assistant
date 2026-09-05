@@ -10,9 +10,9 @@ import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
 import CircularProgress from "@mui/material/CircularProgress";
 import ChatBubbleRoundedIcon from "@mui/icons-material/ChatBubbleRounded";
+import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
 import HubRoundedIcon from "@mui/icons-material/HubRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
-import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import { tokens } from "@/lib/theme";
@@ -25,6 +25,7 @@ import { useAuth } from "@/lib/auth/AuthProvider";
 const NAV_ITEMS = [
   { href: "/", label: "Chat", icon: ChatBubbleRoundedIcon },
   { href: "/integrations", label: "Integrations", icon: HubRoundedIcon },
+  { href: "/agents", label: "Agents", icon: AutoAwesomeRoundedIcon },
 ];
 
 interface SidebarProps {

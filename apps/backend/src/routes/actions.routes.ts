@@ -17,10 +17,10 @@ actionsRoutes.get("/pending", async (req, res) => {
 });
 
 const emailDraftSchema = z.object({
-  to: z.string().email(),
-  subject: z.string().min(1),
-  body: z.string().min(1),
-  cc: z.string().email().optional(),
+  to: z.string().trim().email().max(254),
+  subject: z.string().trim().min(1).max(500, "Subject is too long (max 500 characters)"),
+  body: z.string().trim().min(1).max(200_000, "Body is too long (max 200,000 characters)"),
+  cc: z.string().trim().email().max(254).optional(),
   attachCv: z.boolean().optional(),
 });
 
@@ -34,7 +34,7 @@ actionsRoutes.post("/email/draft", async (req, res) => {
   }
 });
 
-const linkedinDraftSchema = z.object({ commentary: z.string().min(1).max(3000) });
+const linkedinDraftSchema = z.object({ commentary: z.string().trim().min(1).max(3000) });
 
 actionsRoutes.post("/linkedin/draft", async (req, res) => {
   try {
@@ -47,12 +47,12 @@ actionsRoutes.post("/linkedin/draft", async (req, res) => {
 });
 
 const approveSchema = z.object({
-  to: z.string().email().optional(),
-  subject: z.string().min(1).optional(),
-  body: z.string().min(1).optional(),
-  cc: z.string().email().optional(),
+  to: z.string().trim().email().max(254).optional(),
+  subject: z.string().trim().min(1).max(500).optional(),
+  body: z.string().trim().min(1).max(200_000).optional(),
+  cc: z.string().trim().email().max(254).optional(),
   attachCv: z.boolean().optional(),
-  commentary: z.string().min(1).max(3000).optional(),
+  commentary: z.string().trim().min(1).max(3000).optional(),
 });
 
 actionsRoutes.post("/:id/approve", async (req, res) => {
