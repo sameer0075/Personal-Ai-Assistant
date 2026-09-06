@@ -1,5 +1,5 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { env } from "../../config/env.js";
 
 /**
@@ -49,7 +49,21 @@ async function connectAll(): Promise<ConnectedServer[]> {
   const servers = await Promise.all(
     MCP_SERVER_CONFIGS.map(async (cfg): Promise<ConnectedServer> => {
       const client = new Client({ name: `personal-assistant-backend-${cfg.id}`, version: "0.1.0" });
-      const transport = new StdioClientTransport({ command: cfg.command, args: cfg.args });
+      const transport = new StdioClientTransport({
+        command: cfg.command,
+        args: cfg.args,
+        // The backend is the single source of truth for which database the MCP
+        // servers resolve user credentials from. Without this, gmail/linkedin
+        // look up the userId in whatever DB their own .env points at, so if
+        // that differs from the DB the backend wrote the credential into, the
+        // lookup fails with "No Google account is connected yet" even though
+        // the user connected it. dotenv never overrides vars already present,
+        // so this inherited value wins over the child's .env.
+        env: {
+          ...getDefaultEnvironment(),
+          ...(env.DATABASE_URL ? { DATABASE_URL: env.DATABASE_URL } : {}),
+        },
+      });
       await client.connect(transport);
       console.log(`✅ connected to MCP server: ${cfg.id}`);
       return { id: cfg.id, client };

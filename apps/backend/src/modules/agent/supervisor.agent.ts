@@ -9,6 +9,7 @@ import { gmailDraftMessageTool } from "./tools/gmail-draft.tool.js";
 import { linkedinDraftPostTool } from "./tools/linkedin-draft.tool.js";
 import { generateImageTool } from "./tools/generate-image.tool.js";
 import { loadMcpToolsByName } from "../mcp/mcp-tool-adapter.js";
+import { nowContext } from "./now-context.js";
 
 type CompiledAgent = ReturnType<typeof createReactAgent>;
 
@@ -50,7 +51,9 @@ const EMAIL_PROMPT = [
 
 const CALENDAR_PROMPT = [
   "You are the user's calendar agent.",
-  "- calendar_list_events: list upcoming events.",
+  "- calendar_list_events: list upcoming events. Always pass timeMin/timeMax based on the CURRENT DATE AND TIME",
+  "  given in the run context - never guess or invent the date. For 'today'/upcoming, start at today and look",
+  "  ahead; for an explicit date the user names, use that date.",
   "- calendar_create_event / calendar_delete_event: create/delete events - these take effect immediately.",
   "",
   "Only create or delete events the user explicitly asked about - don't clean up, merge, or reschedule entries",
@@ -195,8 +198,14 @@ function wrapSpecialistAsTool(specialist: SpecialistDef, collector: BaseMessage[
     async ({ input }: { input: string }, config) => {
       const userId = config?.configurable?.userId as string | undefined;
       let answer = "";
+      // The date is prepended to this specialist's user-role message (not a
+      // SystemMessage) on purpose: the Google model only promotes the FIRST
+      // system message to systemInstruction, so an extra system message would
+      // be dropped. Text in the request is guaranteed to be seen, and this runs
+      // fresh per call, so overnight/day changes never leave a stale date.
+      const datedInput = `Context for this run:\n${nowContext()}\n\nUser request:\n${input}`;
       const stream = await specialist.agent.stream(
-        { messages: [new HumanMessage(input)] },
+        { messages: [new HumanMessage(datedInput)] },
         { configurable: { userId, recursionLimit: 40 }, streamMode: "updates" }
       );
       for await (const update of stream) {
@@ -233,7 +242,10 @@ export async function buildSupervisorGraph(collector: BaseMessage[]): Promise<Co
   return createReactAgent({
     llm: createChatModel(),
     tools: roster.map((def) => wrapSpecialistAsTool(def, collector)),
-    prompt: SUPERVISOR_PROMPT,
+    // Graph is rebuilt per request, so the current date is baked in fresh
+    // every time. The supervisor composes the final answer, so it needs to
+    // know "today" too - not just the calendar specialist.
+    prompt: [nowContext(), SUPERVISOR_PROMPT].join("\n\n"),
   });
 }
 

@@ -3,6 +3,7 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { createChatModel } from "../llm/llm.provider.js";
 import { retrieveRelevantChunks } from "../rag/retrieve.service.js";
 import { documentRepository } from "../rag/document.repository.js";
+import { nowContext } from "./now-context.js";
 import type { ChatAnswer, RetrievedChunk } from "../../types/index.js";
 
 /**
@@ -37,7 +38,7 @@ async function generateNode(state: typeof RagState.State) {
     "the user has uploaded about themselves (e.g. their CV).",
     "If the context does not contain the answer, say so honestly instead of guessing.",
     "Cite context snippets by their [n] number when you use them.",
-    `Current Date is ${new Date()}`,
+    nowContext(),
     "",
     "Context:",
     context,
