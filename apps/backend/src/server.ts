@@ -2,6 +2,7 @@ import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { assertDatabaseConnection } from "./config/database.js";
 import { embeddingService } from "./modules/embeddings/embedding.service.js";
+import { startAutomationWorker } from "./modules/automations/automations.service.js";
 
 async function main() {
   // Run in parallel with the DB check - the embedding model load (first-run
@@ -24,6 +25,7 @@ async function main() {
   app.listen(env.PORT, () => {
     console.log(`🚀 backend listening on http://localhost:${env.PORT}`);
   });
+  startAutomationWorker();
 }
 
 main().catch((err) => {

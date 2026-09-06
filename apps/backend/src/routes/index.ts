@@ -11,6 +11,7 @@ import { sessionsRoutes } from "./sessions.routes.js";
 import { authRoutes } from "./auth.routes.js";
 import { agentsRoutes } from "./agents.routes.js";
 import { searchRoutes } from "./search.routes.js";
+import { automationsRoutes } from "./automations.routes.js";
 
 export const apiRouter = Router();
 
@@ -26,3 +27,4 @@ apiRouter.use("/actions", actionsRoutes);
 apiRouter.use("/sessions", sessionsRoutes);
 apiRouter.use("/agents", agentsRoutes);
 apiRouter.use("/search", searchRoutes);
+apiRouter.use("/automations", automationsRoutes);

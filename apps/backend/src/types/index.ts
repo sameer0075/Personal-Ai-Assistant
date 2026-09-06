@@ -156,3 +156,69 @@ export interface UnifiedSearchResult {
   highlight: UnifiedSearchGroup | null;
   groups: UnifiedSearchGroup[];
 }
+
+/* ---------------------------------- Automations (scheduled tasks) ---------------------------------- */
+
+export type ScheduleKind = "once" | "interval" | "cron";
+export type DeliveryMode = "chat" | "email" | "both";
+
+export interface ScheduledTask {
+  id: string;
+  userId: string;
+  title: string;
+  prompt: string;
+  scheduleKind: ScheduleKind;
+  cronExpr: string | null;
+  intervalMinutes: number | null;
+  timezone: string;
+  /** ISO datetime of the next (or only) intended run. */
+  triggerAt: string;
+  enabled: boolean;
+  deliveryMode: DeliveryMode;
+  /** Destination email; defaults to the user's connected Gmail when null. */
+  emailTo: string | null;
+  /** Email subject; defaults to "[Automation: <title>]" when null. */
+  emailSubject: string | null;
+  deliverToSessionId: string | null;
+  lastRunAt: string | null;
+  lastError: string | null;
+  runCount: number;
+  createdAt: string;
+}
+
+/** How a run's output is delivered. Email requires a connected Google account. */
+export interface DeliveryDefinition {
+  mode: DeliveryMode;
+  emailTo?: string;
+  emailSubject?: string;
+}
+
+/** A schedule definition as supplied by the client. */
+export interface ScheduleDefinition {
+  kind: ScheduleKind;
+  /** ISO datetime — required for "once"; optional "start at" for "interval". */
+  at?: string;
+  intervalMinutes?: number;
+  /** 5-field cron expression (minute hour day-of-month month day-of-week). */
+  cron?: string;
+  /** IANA timezone, e.g. "Asia/Karachi" (default "UTC"). */
+  timezone?: string;
+}
+
+export interface CreateAutomationInput {
+  title: string;
+  prompt: string;
+  schedule: ScheduleDefinition;
+  delivery?: DeliveryDefinition;
+  /** Optional chat to deliver results into; defaults to the most recent one. */
+  deliverToSessionId?: string;
+}
+
+export interface UpdateAutomationInput {
+  title?: string;
+  prompt?: string;
+  schedule?: ScheduleDefinition;
+  delivery?: Partial<DeliveryDefinition>;
+  deliverToSessionId?: string | null;
+  enabled?: boolean;
+}
