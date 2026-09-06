@@ -1,0 +1,27 @@
+{
+  "name": "backend",
+  "description": "AI assistant API + agent graph + bundled MCP servers",
+  "deployment": {
+    "external": {
+      "imagePath": "registry.northflank.com/sameer0075s/ai-assistant-backend:latest",
+      "registryCredentialId": null
+    }
+  },
+  "ports": [
+    {
+      "name": "backend-http",
+      "internalPort": 4000,
+      "public": true,
+      "domains": [],
+      "protocol": "HTTP"
+    }
+  ],
+  "runtimeEnvironment": {
+    "NODE_ENV": "production",
+    "PORT": "4000"
+  },
+  "scale": {
+    "instances": 1,
+    "deploymentPlan": "nf-compute-20"
+  }
+}

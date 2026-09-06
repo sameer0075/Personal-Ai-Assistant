@@ -1,0 +1,24 @@
+# PRODUCTION OVERRIDES ONLY.
+#
+# Everything else is pulled automatically from apps/backend/.env - so you do NOT
+# duplicate your secrets/keys here (DB URL, OAuth client id/secret, all three
+# 64-hex TOKEN_ENCRYPTION_KEYs, GOOGLE_API_KEY, JWT_SECRET, TAVILY_API_KEY all
+# come from .env untouched).
+#
+# Set these per your deployed URLs (Northflank issues them):
+#   CORS_ORIGIN                  <- frontend public URL
+#   FRONTEND_BASE_URL            <- frontend public URL
+#   GOOGLE_OAUTH_REDIRECT_URI    <- backend public URL + /api/google/callback
+#   LINKEDIN_OAUTH_REDIRECT_URI  <- backend public URL + /api/linkedin/callback
+
+# --- MCP servers: in the image they are plain `node ../mcp-<x>/dist/server.js` ---
+# The backend .env says `npx tsx ../...` (local dev); a deployed service must
+# exec the compiled JS directly. Keep these as-is.
+MCP_GMAIL_CALENDAR_SERVER_COMMAND: "node"
+MCP_GMAIL_CALENDAR_SERVER_ARGS: "../mcp-gmail-calendar/dist/server.js"
+MCP_LINKEDIN_SERVER_COMMAND: "node"
+MCP_LINKEDIN_SERVER_ARGS: "../mcp-linkedin/dist/server.js"
+MCP_GITHUB_SERVER_COMMAND: "node"
+MCP_GITHUB_SERVER_ARGS: "../mcp-github/dist/server.js"
+MCP_WEB_SEARCH_SERVER_COMMAND: "node"
+MCP_WEB_SEARCH_SERVER_ARGS: "../mcp-web-search/dist/server.js"
