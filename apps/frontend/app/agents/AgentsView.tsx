@@ -15,25 +15,36 @@ import PublicRoundedIcon from "@mui/icons-material/PublicRounded";
 import PsychologyRoundedIcon from "@mui/icons-material/PsychologyRounded";
 import Sidebar from "@/components/Sidebar";
 import { tokens } from "@/lib/theme";
+import { GithubLogo } from "@/components/integrations/BrandLogo";
 import { getAgentRoster, type AgentRoster, type SpecialistInfo } from "@/lib/api/agents";
 
 // ---------------------------------------------------------------------------
-// Hero geometry: pentagon layout for 5 specialists around a center core
+// Hero geometry: specialists evenly spaced around a center core. Positions are
+// computed from the live roster count (pentagon at 5, hexagon at 6, ...) so
+// the canvas never assumes a fixed team size.
 // ---------------------------------------------------------------------------
 const CX = 300;
 const CY = 300;
 const RADIUS = 230;
-const angles = [-90, -18, 54, 126, 198]; // degrees from +x (top → clockwise)
 
-const nodePositions = angles.map((deg) => {
-  const rad = (deg * Math.PI) / 180;
-  return { x: CX + RADIUS * Math.cos(rad), y: CY + RADIUS * Math.sin(rad) };
-});
+function computeNodePositions(n: number) {
+  return Array.from({ length: n }, (_, i) => {
+    const deg = -90 + (360 / n) * i;
+    const rad = (deg * Math.PI) / 180;
+    return { x: CX + RADIUS * Math.cos(rad), y: CY + RADIUS * Math.sin(rad) };
+  });
+}
+
+function GithubBrandIcon({ sx }: { sx?: { fontSize?: number | string } }) {
+  const size = typeof sx?.fontSize === "number" ? sx.fontSize : 20;
+  return <GithubLogo size={size} fill={tokens.text} />;
+}
 
 const SPECIALIST_ICONS: Record<string, React.FC<{ sx?: object }>> = {
   email_agent: EmailRoundedIcon,
   calendar_agent: CalendarMonthRoundedIcon,
   linkedin_agent: LinkedInIcon,
+  github_agent: GithubBrandIcon,
   web_agent: PublicRoundedIcon,
   knowledge_agent: PsychologyRoundedIcon,
 };
@@ -42,6 +53,7 @@ const SPECIALIST_LABELS: Record<string, string> = {
   email_agent: "Email",
   calendar_agent: "Calendar",
   linkedin_agent: "LinkedIn",
+  github_agent: "GitHub",
   web_agent: "Web",
   knowledge_agent: "Knowledge",
 };
@@ -55,6 +67,7 @@ const normalStyles = { bgcolor: tokens.accentDim, color: tokens.accentBright, bo
 // ---------------------------------------------------------------------------
 function Hero({ roster }: { roster: AgentRoster }) {
   const specialistNames = useMemo(() => roster.specialists.map((s) => s.name), [roster]);
+  const nodePositions = useMemo(() => computeNodePositions(roster.specialists.length), [roster.specialists.length]);
 
   return (
     <Box sx={{ position: "relative", width: "100%", height: { xs: 380, sm: 520 }, maxWidth: 600, mx: "auto" }}>
