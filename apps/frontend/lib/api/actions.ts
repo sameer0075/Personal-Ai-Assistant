@@ -1,6 +1,6 @@
 import { apiFetch, apiJson } from "./client";
 
-export type PendingActionType = "email" | "linkedin_post";
+export type PendingActionType = "email" | "linkedin_post" | "github_issue" | "github_comment";
 export type PendingActionStatus = "pending" | "approved" | "rejected";
 
 export interface EmailActionPayload {
@@ -15,11 +15,29 @@ export interface LinkedinActionPayload {
   commentary: string;
 }
 
+export interface GithubIssueActionPayload {
+  repo: string;
+  title: string;
+  body: string;
+}
+
+export interface GithubCommentActionPayload {
+  repo: string;
+  issueNumber: number;
+  body: string;
+}
+
+export type ActionPayload =
+  | EmailActionPayload
+  | LinkedinActionPayload
+  | GithubIssueActionPayload
+  | GithubCommentActionPayload;
+
 export interface PendingAction {
   id: string;
   type: PendingActionType;
   status: PendingActionStatus;
-  payload: EmailActionPayload | LinkedinActionPayload;
+  payload: ActionPayload;
   createdBy: "agent" | "user";
   result: Record<string, unknown> | null;
   createdAt: string;
@@ -38,9 +56,17 @@ export function createLinkedinDraft(payload: LinkedinActionPayload): Promise<Pen
   return apiJson<PendingAction>("/actions/linkedin/draft", "POST", payload);
 }
 
+export function createGithubIssueDraft(payload: GithubIssueActionPayload): Promise<PendingAction> {
+  return apiJson<PendingAction>("/actions/github/issue/draft", "POST", payload);
+}
+
+export function createGithubCommentDraft(payload: GithubCommentActionPayload): Promise<PendingAction> {
+  return apiJson<PendingAction>("/actions/github/comment/draft", "POST", payload);
+}
+
 export function approveAction(
   id: string,
-  edits?: Partial<EmailActionPayload & LinkedinActionPayload>
+  edits?: Partial<ActionPayload>
 ): Promise<PendingAction> {
   return apiJson<PendingAction>(`/actions/${id}/approve`, "POST", edits ?? {});
 }

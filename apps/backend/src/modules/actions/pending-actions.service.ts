@@ -1,6 +1,6 @@
 import { pendingActionsRepository } from "./pending-actions.repository.js";
 import { callMcpTool } from "../mcp/mcp-client.service.js";
-import type { EmailActionPayload, LinkedinActionPayload, PendingAction } from "../../types/index.js";
+import type { EmailActionPayload, GithubCommentActionPayload, GithubIssueActionPayload, LinkedinActionPayload, PendingAction } from "../../types/index.js";
 
 export function createEmailDraft(
   userId: string,
@@ -16,6 +16,22 @@ export function createLinkedinDraft(
   createdBy: "agent" | "user" = "agent"
 ): Promise<PendingAction> {
   return pendingActionsRepository.create({ userId, type: "linkedin_post", payload: payload as unknown as Record<string, unknown>, createdBy });
+}
+
+export function createGithubIssueDraft(
+  userId: string,
+  payload: GithubIssueActionPayload,
+  createdBy: "agent" | "user" = "agent"
+): Promise<PendingAction> {
+  return pendingActionsRepository.create({ userId, type: "github_issue", payload: payload as unknown as Record<string, unknown>, createdBy });
+}
+
+export function createGithubCommentDraft(
+  userId: string,
+  payload: GithubCommentActionPayload,
+  createdBy: "agent" | "user" = "agent"
+): Promise<PendingAction> {
+  return pendingActionsRepository.create({ userId, type: "github_comment", payload: payload as unknown as Record<string, unknown>, createdBy });
 }
 
 export function listPendingActions(userId: string): Promise<PendingAction[]> {
@@ -45,15 +61,23 @@ export async function approvePendingAction(
     if (attachCv) args.attachCv = true;
     const json = await callMcpTool("gmail_send_message", args);
     result = JSON.parse(json);
-  } else {
+  } else if (existing.type === "linkedin_post") {
     const { commentary } = payload as LinkedinActionPayload;
     const json = await callMcpTool("linkedin_create_post", { commentary, userId });
+    result = JSON.parse(json);
+  } else if (existing.type === "github_issue") {
+    const { repo, title, body } = payload as GithubIssueActionPayload;
+    const json = await callMcpTool("github_create_issue", { repo, title, body, userId });
+    result = JSON.parse(json);
+  } else {
+    const { repo, issueNumber, body } = payload as GithubCommentActionPayload;
+    const json = await callMcpTool("github_create_issue_comment", { repo, issueNumber, body, userId });
     result = JSON.parse(json);
   }
 
   const updated = await pendingActionsRepository.markDecided(id, userId, "approved", result);
   if (!updated) {
-    throw new Error(`"${existing.type}" action was already decided elsewhere, but this request also executed it - please check your Gmail/LinkedIn to avoid a duplicate.`);
+    throw new Error(`"${existing.type}" action was already decided elsewhere, but this request also executed it - please check your Gmail/LinkedIn/GitHub to avoid a duplicate.`);
   }
   return updated;
 }

@@ -37,6 +37,7 @@ import MailRoundedIcon from "@mui/icons-material/MailRounded";
 import EventAvailableRoundedIcon from "@mui/icons-material/EventAvailableRounded";
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import MailOutlineRoundedIcon from "@mui/icons-material/MailOutlineRounded";
+import BugReportRoundedIcon from "@mui/icons-material/BugReportRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import CheckRoundedIcon from "@mui/icons-material/CheckRounded";
@@ -384,7 +385,17 @@ function HomeContent() {
     );
     setSnackbar(
       updated.status === "approved"
-        ? { message: updated.type === "email" ? "Email sent." : "Post published.", severity: "success" }
+        ? {
+            message:
+              updated.type === "email"
+                ? "Email sent."
+                : updated.type === "linkedin_post"
+                  ? "Post published."
+                  : updated.type === "github_issue"
+                    ? "Issue created on GitHub."
+                    : "Comment posted on GitHub.",
+            severity: "success",
+          }
         : { message: "Draft discarded.", severity: "success" }
     );
   }
@@ -1105,18 +1116,26 @@ function MessageBubble({
 
 function PendingActionCard({ action, onReview }: { action: PendingAction; onReview: () => void }) {
   const isEmail = action.type === "email";
+  const isLinkedin = action.type === "linkedin_post";
+  const isGithubIssue = action.type === "github_issue";
+  const isGithubComment = action.type === "github_comment";
+
   const preview =
     isEmail && "subject" in action.payload
       ? `To ${action.payload.to} — "${action.payload.subject}"`
-      : "commentary" in action.payload
+      : isLinkedin && "commentary" in action.payload
         ? action.payload.commentary.slice(0, 80) + (action.payload.commentary.length > 80 ? "…" : "")
-        : "";
+        : isGithubIssue && "title" in action.payload
+          ? `${action.payload.repo} — "${action.payload.title}"`
+          : isGithubComment && "issueNumber" in action.payload
+            ? `${action.payload.repo} #${action.payload.issueNumber}`
+            : "";
 
   const statusChip =
     action.status === "pending" ? (
       <Chip size="small" label="Awaiting your approval" sx={{ bgcolor: tokens.accentDim, color: tokens.accentBright }} />
     ) : action.status === "approved" ? (
-      <Chip size="small" label={isEmail ? "Sent" : "Published"} sx={{ bgcolor: tokens.panelRaised, color: tokens.text }} />
+      <Chip size="small" label={isEmail ? "Sent" : isLinkedin ? "Published" : "Created"} sx={{ bgcolor: tokens.panelRaised, color: tokens.text }} />
     ) : (
       <Chip size="small" label="Rejected" sx={{ bgcolor: tokens.panelRaised, color: tokens.muted }} />
     );
@@ -1129,12 +1148,14 @@ function PendingActionCard({ action, onReview }: { action: PendingAction; onRevi
       <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
         {isEmail ? (
           <MailOutlineRoundedIcon sx={{ fontSize: 18, color: tokens.accentBright, mt: 0.25 }} />
-        ) : (
+        ) : isLinkedin ? (
           <ArrowUpwardRoundedIcon sx={{ fontSize: 18, color: tokens.accentBright, mt: 0.25 }} />
+        ) : (
+          <BugReportRoundedIcon sx={{ fontSize: 18, color: tokens.accentBright, mt: 0.25 }} />
         )}
         <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="caption" sx={{ fontWeight: 600, color: tokens.text }}>
-            {isEmail ? "Drafted email" : "Drafted LinkedIn post"}
+            {isEmail ? "Drafted email" : isLinkedin ? "Drafted LinkedIn post" : isGithubIssue ? "Drafted GitHub issue" : "Drafted GitHub comment"}
           </Typography>
           <Typography variant="caption" sx={{ color: tokens.muted, overflowWrap: "break-word" }}>
             {preview}

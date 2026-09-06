@@ -4,6 +4,8 @@ import {
   listPendingActions,
   createEmailDraft,
   createLinkedinDraft,
+  createGithubIssueDraft,
+  createGithubCommentDraft,
   approvePendingAction,
   rejectPendingAction,
 } from "../modules/actions/pending-actions.service.js";
@@ -46,6 +48,38 @@ actionsRoutes.post("/linkedin/draft", async (req, res) => {
   }
 });
 
+const githubIssueDraftSchema = z.object({
+  repo: z.string().trim().min(3).max(200).refine((r) => r.includes("/"), "Format as owner/repo"),
+  title: z.string().trim().min(1).max(500),
+  body: z.string().trim().min(1).max(50_000),
+});
+
+actionsRoutes.post("/github/issue/draft", async (req, res) => {
+  try {
+    const payload = githubIssueDraftSchema.parse(req.body);
+    const action = await createGithubIssueDraft(req.userId!, payload, "user");
+    res.status(201).json(action);
+  } catch (err) {
+    res.status(422).json({ error: err instanceof Error ? err.message : "Failed to draft GitHub issue" });
+  }
+});
+
+const githubCommentDraftSchema = z.object({
+  repo: z.string().trim().min(3).max(200).refine((r) => r.includes("/"), "Format as owner/repo"),
+  issueNumber: z.coerce.number().int().positive(),
+  body: z.string().trim().min(1).max(50_000),
+});
+
+actionsRoutes.post("/github/comment/draft", async (req, res) => {
+  try {
+    const payload = githubCommentDraftSchema.parse(req.body);
+    const action = await createGithubCommentDraft(req.userId!, payload, "user");
+    res.status(201).json(action);
+  } catch (err) {
+    res.status(422).json({ error: err instanceof Error ? err.message : "Failed to draft GitHub comment" });
+  }
+});
+
 const approveSchema = z.object({
   to: z.string().trim().email().max(254).optional(),
   subject: z.string().trim().min(1).max(500).optional(),
@@ -53,6 +87,9 @@ const approveSchema = z.object({
   cc: z.string().trim().email().max(254).optional(),
   attachCv: z.boolean().optional(),
   commentary: z.string().trim().min(1).max(3000).optional(),
+  repo: z.string().trim().min(3).max(200).optional(),
+  title: z.string().trim().min(1).max(500).optional(),
+  issueNumber: z.coerce.number().int().positive().optional(),
 });
 
 actionsRoutes.post("/:id/approve", async (req, res) => {

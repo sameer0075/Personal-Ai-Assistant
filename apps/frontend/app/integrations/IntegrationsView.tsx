@@ -14,6 +14,8 @@ import GmailPanel from "@/components/GmailPanel";
 import CalendarPanel from "@/components/CalendarPanel";
 import LinkedInConnectCard from "@/components/LinkedInConnectCard";
 import LinkedInPanel from "@/components/LinkedInPanel";
+import GithubConnectCard from "@/components/GithubConnectCard";
+import GithubPanel from "@/components/GithubPanel";
 import { tokens } from "@/lib/theme";
 
 const OAUTH_CALLBACK_PARAMS = ["google", "linkedin"] as const;
@@ -64,6 +66,8 @@ export default function IntegrationsView() {
             <CalendarPanel />
             <LinkedInConnectCard />
             <LinkedInPanel />
+            <GithubConnectCard />
+            <GithubPanel />
           </Stack>
         </Container>
       </Box>

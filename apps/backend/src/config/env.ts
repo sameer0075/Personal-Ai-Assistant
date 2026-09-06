@@ -50,6 +50,10 @@ const envSchema = z.object({
   // Check for a newer version occasionally: https://learn.microsoft.com/en-us/linkedin/marketing/versioning
   LINKEDIN_API_VERSION: z.string().default("202607"),
 
+  // GitHub PATs are stored AES-encrypted in github_credentials and read back by
+  // mcp-github. THIS value must exactly match apps/mcp-github/.env's copy.
+  GITHUB_TOKEN_ENCRYPTION_KEY: z.string().length(64, "GITHUB_TOKEN_ENCRYPTION_KEY must be a 64-char hex string (32 bytes)"),
+
   FRONTEND_BASE_URL: z.string().default("http://localhost:3000"),
   JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters long"),
   JWT_EXPIRES_IN: z.string().default("30d"),
@@ -60,6 +64,8 @@ const envSchema = z.object({
   MCP_GMAIL_CALENDAR_SERVER_ARGS: z.string().default("tsx ../mcp-gmail-calendar/src/server.ts"),
   MCP_LINKEDIN_SERVER_COMMAND: z.string().default("npx"),
   MCP_LINKEDIN_SERVER_ARGS: z.string().default("tsx ../mcp-linkedin/src/server.ts"),
+  MCP_GITHUB_SERVER_COMMAND: z.string().default("npx"),
+  MCP_GITHUB_SERVER_ARGS: z.string().default("tsx ../mcp-github/src/server.ts"),
   MCP_WEB_SEARCH_SERVER_COMMAND: z.string().default("npx"),
   MCP_WEB_SEARCH_SERVER_ARGS: z.string().default("tsx ../mcp-web-search/src/server.ts"),
 });

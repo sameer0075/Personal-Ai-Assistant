@@ -14,6 +14,8 @@ const AGENT_FORBIDDEN_TOOLS = new Set([
   "linkedin_create_post",
   "linkedin_delete_post",
   "whatsapp_send_message",
+  "github_create_issue",
+  "github_create_issue_comment",
 ]);
 
 /**

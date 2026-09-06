@@ -44,7 +44,7 @@ function extractToolCallTrace(messages: BaseMessage[]): ToolCallTrace[] {
   return trace;
 }
 
-const DRAFT_TOOL_NAMES = new Set(["gmail_draft_message", "linkedin_draft_post"]);
+const DRAFT_TOOL_NAMES = new Set(["gmail_draft_message", "linkedin_draft_post", "github_draft_issue", "github_draft_comment"]);
 
 async function extractPendingActions(toolCalls: ToolCallTrace[], userId: string): Promise<PendingAction[]> {
   const ids = toolCalls

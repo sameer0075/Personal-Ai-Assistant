@@ -1,5 +1,5 @@
-export type SourceType = "cv" | "email" | "pr" | "linkedin" | "calendar" | "general" | 'conversation';
-export type PendingActionType = "email" | "linkedin_post";
+export type SourceType = "cv" | "email" | "pr" | "linkedin" | "calendar" | "general" | "conversation" | "github";
+export type PendingActionType = "email" | "linkedin_post" | "github_issue" | "github_comment";
 export type PendingActionStatus = "pending" | "approved" | "rejected";
 
 export interface AuthUser {
@@ -53,11 +53,26 @@ export interface LinkedinActionPayload {
   commentary: string;
 }
 
+export interface GithubIssueActionPayload {
+  /** Repository as "owner/repo". */
+  repo: string;
+  title: string;
+  body: string;
+}
+
+export interface GithubCommentActionPayload {
+  /** Repository as "owner/repo". */
+  repo: string;
+  /** Number of the issue or pull request to comment on. */
+  issueNumber: number;
+  body: string;
+}
+
 export interface PendingAction {
   id: string;
   type: PendingActionType;
   status: PendingActionStatus;
-  payload: EmailActionPayload | LinkedinActionPayload;
+  payload: EmailActionPayload | LinkedinActionPayload | GithubIssueActionPayload | GithubCommentActionPayload;
   createdBy: "agent" | "user";
   result: Record<string, unknown> | null;
   createdAt: string;

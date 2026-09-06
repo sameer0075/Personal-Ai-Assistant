@@ -15,7 +15,15 @@ import Chip from "@mui/material/Chip";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Checkbox from "@mui/material/Checkbox";
 import { tokens } from "@/lib/theme";
-import { approveAction, rejectAction, EmailActionPayload, LinkedinActionPayload, PendingAction } from "@/lib/api/actions";
+import {
+  approveAction,
+  rejectAction,
+  EmailActionPayload,
+  GithubCommentActionPayload,
+  GithubIssueActionPayload,
+  LinkedinActionPayload,
+  PendingAction,
+} from "@/lib/api/actions";
 
 interface ActionApprovalModalProps {
   action: PendingAction | null;
@@ -64,6 +72,9 @@ const fieldSx = {
 
 export default function ActionApprovalModal({ action, open, onClose, onDecided }: ActionApprovalModalProps) {
   const isEmail = action?.type === "email";
+  const isLinkedin = action?.type === "linkedin_post";
+  const isGithubIssue = action?.type === "github_issue";
+  const isGithubComment = action?.type === "github_comment";
 
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
@@ -71,6 +82,9 @@ export default function ActionApprovalModal({ action, open, onClose, onDecided }
   const [body, setBody] = useState("");
   const [attachCv, setAttachCv] = useState(false);
   const [commentary, setCommentary] = useState("");
+  const [repo, setRepo] = useState("");
+  const [title, setTitle] = useState("");
+  const [issueNumber, setIssueNumber] = useState("");
   const [isSubmitting, setIsSubmitting] = useState<"approve" | "reject" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,15 +92,33 @@ export default function ActionApprovalModal({ action, open, onClose, onDecided }
     if (!action) return;
     setError(null);
     setIsSubmitting(null);
-    if (action.type === "email") {
-      const p = action.payload as EmailActionPayload;
-      setTo(p.to);
-      setCc(p.cc ?? "");
-      setSubject(p.subject);
-      setBody(p.body);
-      setAttachCv(Boolean(p.attachCv));
-    } else {
-      setCommentary((action.payload as LinkedinActionPayload).commentary);
+    switch (action.type) {
+      case "email": {
+        const p = action.payload as EmailActionPayload;
+        setTo(p.to);
+        setCc(p.cc ?? "");
+        setSubject(p.subject);
+        setBody(p.body);
+        setAttachCv(Boolean(p.attachCv));
+        break;
+      }
+      case "linkedin_post":
+        setCommentary((action.payload as LinkedinActionPayload).commentary);
+        break;
+      case "github_issue": {
+        const p = action.payload as GithubIssueActionPayload;
+        setRepo(p.repo);
+        setTitle(p.title);
+        setBody(p.body);
+        break;
+      }
+      case "github_comment": {
+        const p = action.payload as GithubCommentActionPayload;
+        setRepo(p.repo);
+        setIssueNumber(String(p.issueNumber));
+        setBody(p.body);
+        break;
+      }
     }
   }, [action]);
 
@@ -96,11 +128,20 @@ export default function ActionApprovalModal({ action, open, onClose, onDecided }
     setIsSubmitting("approve");
     setError(null);
     try {
-      const edits = isEmail ? { to, subject, body, cc: cc || undefined, attachCv } : { commentary };
-      const updated = await approveAction(action!.id, edits);
+      let edits: Partial<Record<string, unknown>>;
+      if (isEmail) {
+        edits = { to, subject, body, cc: cc || undefined, attachCv };
+      } else if (isLinkedin) {
+        edits = { commentary };
+      } else if (isGithubIssue) {
+        edits = { repo, title, body };
+      } else {
+        edits = { repo, issueNumber: Number(issueNumber), body };
+      }
+      const updated = await approveAction(action!.id, edits as never);
       onDecided(updated);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send/publish");
+      setError(err instanceof Error ? err.message : "Failed to execute draft");
       setIsSubmitting(null);
     }
   }
@@ -130,7 +171,13 @@ export default function ActionApprovalModal({ action, open, onClose, onDecided }
       }}
     >
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, color: tokens.text }}>
-        {isEmail ? "Review email before sending" : "Review LinkedIn post before publishing"}
+        {isEmail
+          ? "Review email before sending"
+          : isLinkedin
+            ? "Review LinkedIn post before publishing"
+            : isGithubIssue
+              ? "Review GitHub issue before opening"
+              : "Review comment before posting"}
         <Chip
           size="small"
           label={action.createdBy === "agent" ? "Drafted by assistant" : "Your draft"}
@@ -146,8 +193,10 @@ export default function ActionApprovalModal({ action, open, onClose, onDecided }
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <Typography variant="body2" sx={{ color: tokens.muted }}>
-            Nothing has been {isEmail ? "sent" : "published"} yet. Make any changes you need below, then
-            approve to {isEmail ? "send it" : "publish it"} - or reject to discard the draft.
+            Nothing has been{" "}
+            {isEmail ? "sent" : isLinkedin ? "published" : isGithubIssue ? "created" : "posted"} yet. Make any
+            changes you need below, then approve to {isEmail ? "send it" : isLinkedin ? "publish it" : isGithubIssue ? "create it" : "post it"} - or
+            reject to discard the draft.
           </Typography>
 
           {isEmail ? (
@@ -200,7 +249,7 @@ export default function ActionApprovalModal({ action, open, onClose, onDecided }
                 sx={{ color: tokens.text }}
               />
             </>
-          ) : (
+          ) : isLinkedin ? (
             <TextField
               label="Post text"
               size="small"
@@ -212,6 +261,49 @@ export default function ActionApprovalModal({ action, open, onClose, onDecided }
               helperText={`${commentary.length}/3000 - this will be visible to your LinkedIn network`}
               sx={fieldSx}
             />
+          ) : (
+            <>
+              <TextField
+                label="Repository"
+                size="small"
+                required
+                placeholder="owner/repo"
+                value={repo}
+                onChange={(e) => setRepo(e.target.value)}
+                helperText="Format: owner/repo"
+                sx={fieldSx}
+              />
+              {isGithubIssue ? (
+                <TextField
+                  label="Issue title"
+                  size="small"
+                  required
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  sx={fieldSx}
+                />
+              ) : (
+                <TextField
+                  label="Issue / PR number"
+                  size="small"
+                  required
+                  type="number"
+                  value={issueNumber}
+                  onChange={(e) => setIssueNumber(e.target.value)}
+                  sx={fieldSx}
+                />
+              )}
+              <TextField
+                label={isGithubIssue ? "Issue body" : "Comment text"}
+                size="small"
+                required
+                multiline
+                minRows={6}
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                sx={fieldSx}
+              />
+            </>
           )}
 
           {error && <Alert severity="error">{error}</Alert>}
@@ -232,14 +324,23 @@ export default function ActionApprovalModal({ action, open, onClose, onDecided }
         <Button
           variant="contained"
           onClick={handleApprove}
-          disabled={isSubmitting !== null || (isEmail ? !to || !subject || !body : !commentary.trim())}
+          disabled={
+            isSubmitting !== null ||
+            (isEmail
+              ? !to || !subject || !body
+              : isLinkedin
+                ? !commentary.trim()
+                : isGithubIssue
+                  ? !repo || !title || !body
+                  : !repo || !issueNumber || !body)
+          }
           startIcon={isSubmitting === "approve" ? <CircularProgress size={14} color="inherit" /> : undefined}
           sx={{
             background: `linear-gradient(135deg, ${tokens.accent}, ${tokens.accentBright})`,
             "&:hover": { background: `linear-gradient(135deg, ${tokens.accent}, ${tokens.accentBright})` },
           }}
         >
-          {isEmail ? "Approve & send" : "Approve & publish"}
+          {isEmail ? "Approve & send" : isLinkedin ? "Approve & publish" : isGithubIssue ? "Approve & open issue" : "Approve & post comment"}
         </Button>
       </DialogActions>
     </Dialog>

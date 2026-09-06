@@ -7,6 +7,7 @@ import { env } from "../../config/env.js";
 import { searchKnowledgeBaseTool } from "./tools/rag-search.tool.js";
 import { gmailDraftMessageTool } from "./tools/gmail-draft.tool.js";
 import { linkedinDraftPostTool } from "./tools/linkedin-draft.tool.js";
+import { githubDraftIssueTool, githubDraftCommentTool } from "./tools/github-draft.tool.js";
 import { generateImageTool } from "./tools/generate-image.tool.js";
 import { loadMcpToolsByName } from "../mcp/mcp-tool-adapter.js";
 import { nowContext } from "./now-context.js";
@@ -91,6 +92,31 @@ const KNOWLEDGE_PROMPT = [
   "factual answer citing what you found.",
 ].join("\n");
 
+const GITHUB_PROMPT = [
+  "You are the user's GitHub agent.",
+  "- github_list_repos: the user's repositories (name, visibility, description).",
+  "- github_list_issues: issues in a repo (method, state, perPage).",
+  "- github_search_issues: search public code/issues across GitHub (q, perPage).",
+  "- github_list_pulls: open pull requests in a repo.",
+  "- github_get_issue: a single issue or PR by number (metadata/description).",
+  "- github_get_pull: full detail of a pull request - head/base branches, additions/deletions, changed-file count,",
+  "  mergeability. Call this first when asked to review or analyze a PR.",
+  "- github_list_pull_files: the actual file changes in a PR, each with its diff patch. Call this after",
+  "  github_get_pull to see the code and do a real review.",
+  "- github_draft_issue / github_draft_comment: prepare an issue or a comment on an issue/PR (by number) and queue",
+  "  it for the user's approval - they do NOT create or post anything on GitHub.",
+  "",
+  "Code review flow: make a plan (base -> head), call github_get_pull for context, then github_list_pull_files to",
+  "read the diffs, then summarize bugs/quality issues concisely. If the user wants comments on the PR, draft ONE",
+  "consolidated github_draft_comment (by PR number) with your findings.",
+  "",
+  "HUMAN APPROVAL IS MANDATORY: github_draft_issue and github_draft_comment only queue drafts the user approves",
+  "in the app. Never claim an issue was opened or a comment was posted unless the approval flow confirmed it. In",
+  "your reply, tell the user the draft is ready for review. Only read when the user asks what's in their repos,",
+  "what issues exist, etc. When the user says 'file/open/create an issue' or 'comment/reply on a PR', route here",
+  "so the draft goes through approval.",
+].join("\n");
+
 // Which MCP tools each specialist owns (draft tools are backend tools, added below).
 const SPECIALIST_TOOL_PLAN: Record<string, { description: string; prompt: string; mcpToolNames: string[]; backendTools: string[] }> = {
   email_agent: {
@@ -114,6 +140,13 @@ const SPECIALIST_TOOL_PLAN: Record<string, { description: string; prompt: string
     mcpToolNames: ["linkedin_list_recent_posts"],
     backendTools: ["linkedin_draft_post"],
   },
+  github_agent: {
+    description:
+      "GitHub agent - the user's GitHub: reading repositories/issues/pull requests (including PR diffs for code review) and drafting an issue or a comment via the approval flow. Route GitHub issue/repo/PR/review requests here.",
+    prompt: GITHUB_PROMPT,
+    mcpToolNames: ["github_list_repos", "github_list_issues", "github_search_issues", "github_list_pulls", "github_get_issue", "github_get_pull", "github_list_pull_files"],
+    backendTools: ["github_draft_issue", "github_draft_comment"],
+  },
   web_agent: {
     description:
       "Web/general agent - live web search and page fetch, AI image generation, and general analysis (including attached documents shown in the request). Route current events, facts, research, image requests, and anything not covered by the other agents here.",
@@ -134,6 +167,8 @@ const BACKEND_TOOLS: Record<string, StructuredToolInterface> = {
   search_knowledge_base: searchKnowledgeBaseTool,
   gmail_draft_message: gmailDraftMessageTool,
   linkedin_draft_post: linkedinDraftPostTool,
+  github_draft_issue: githubDraftIssueTool,
+  github_draft_comment: githubDraftCommentTool,
   generate_image: generateImageTool,
 };
 
@@ -251,7 +286,7 @@ export async function buildSupervisorGraph(collector: BaseMessage[]): Promise<Co
 
 // Tools whose effects only happen after the user approves them in the UI.
 // Shown to the user on the agents dashboard as "requires review".
-const APPROVAL_GATED_TOOLS = new Set(["gmail_draft_message", "linkedin_draft_post"]);
+const APPROVAL_GATED_TOOLS = new Set(["gmail_draft_message", "linkedin_draft_post", "github_draft_issue", "github_draft_comment"]);
 
 export interface AgentToolSummary {
   name: string;
