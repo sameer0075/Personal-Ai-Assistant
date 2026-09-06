@@ -482,6 +482,7 @@ function HomeContent() {
               </Stack>
             ) : messages.length === 0 ? (
               <Stack sx={{ height: "100%", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+                {mode !== "voice" && (
                 <Box
                   sx={{
                     width: 64,
@@ -497,21 +498,23 @@ function HomeContent() {
                 >
                   <AutoAwesomeRoundedIcon sx={{ fontSize: 28, color: "#fff" }} />
                 </Box>
+                )}
 
                 <Typography sx={{ fontSize: 20, fontWeight: 700, color: tokens.text, mb: 0.75 }}>
-                  Hi, how can I help you today?
+                  {mode === "voice" ? "How can I assist you?" : "Hi, how can I help you today?"}
                 </Typography>
                 <Typography variant="body2" sx={{ color: tokens.muted, mb: 3.5, maxWidth: 380 }}>
                   {mode === "voice"
-                    ? "Tap the mic below and ask me anything. Just say what you need — no typing."
+                    ? "Activate the orb below and speak naturally. I'll listen, process, and respond."
                     : "Upload your CV, connect Google under Integrations, and ask me to look things up, draft emails, or manage your calendar."}
                 </Typography>
 
+                {mode !== "voice" && (
                 <Stack spacing={1.25} sx={{ width: "100%", maxWidth: 420 }}>
                   {SUGGESTIONS.map(({ icon: Icon, text }) => (
                     <Paper
                       key={text}
-                      onClick={() => (mode === "voice" ? submitTurn(text) : handleSuggestionClick(text))}
+                      onClick={() => handleSuggestionClick(text)}
                       elevation={0}
                       sx={{
                         display: "flex",
@@ -538,6 +541,7 @@ function HomeContent() {
                     </Paper>
                   ))}
                 </Stack>
+                )}
               </Stack>
             ) : (
               <Stack spacing={2.5}>
@@ -585,8 +589,8 @@ function HomeContent() {
 
         {/* Composer */}
         <Box sx={{ px: 3, pb: 3, pt: 1 }}>
-          <Container maxWidth="md" disableGutters>
-            {mode === "voice" ? (
+          {mode === "voice" ? (
+            <Container maxWidth="lg" disableGutters>
               <VoiceComposer
                 disabled={isAsking}
                 muted={voiceMuted}
@@ -599,7 +603,9 @@ function HomeContent() {
                 onSubmit={submitTurn}
                 onShowText={() => handleSwitchMode("chat")}
               />
-            ) : (
+            </Container>
+          ) : (
+            <Container maxWidth="md" disableGutters>
             <Paper
               component="form"
               onSubmit={handleAsk}
@@ -730,11 +736,11 @@ function HomeContent() {
                 </Stack>
               </Stack>
             </Paper>
+            </Container>
             )}
             <Typography sx={{ fontSize: 11.5, color: tokens.mutedDim, textAlign: "center", mt: 1.25 }}>
               Works for you, grows with you
             </Typography>
-          </Container>
         </Box>
       </Box>
 
