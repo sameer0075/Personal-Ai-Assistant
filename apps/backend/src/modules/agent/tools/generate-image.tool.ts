@@ -12,15 +12,15 @@ export const generateImageTool = tool(
 
     return (
       `Image generated. imageRef: ${imageRef}\n` +
-      `To use it, pass this exact value as the "imageRef" argument when calling linkedin_create_post. ` +
-      `It expires if unused, so generate it right before posting, not far in advance.`
+      `To use it, pass this exact value as the "imageRef" argument to linkedin_draft_post. ` +
+      `It expires if unused, so generate it right before drafting the post, not far in advance.`
     );
   },
   {
     name: "generate_image",
     description:
-      "Generates an AI image from a text description (via Gemini). Returns a short imageRef, not the image " +
-      "itself - pass that imageRef into linkedin_create_post's imageRef argument to attach it to a post. " +
+      "Generates an AI image from a text description. Returns a short imageRef, not the image " +
+      "itself - pass that imageRef into linkedin_draft_post's imageRef argument to attach it to a post. " +
       "Only generates images; does not post anything by itself.",
     schema: z.object({
       prompt: z

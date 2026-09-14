@@ -66,9 +66,12 @@ const LINKEDIN_PROMPT = [
   "You are the user's LinkedIn agent.",
   "- linkedin_list_recent_posts: read the user's own tracked post history.",
   "- linkedin_draft_post: prepares a post and queues it for the user's approval - it does NOT publish anything.",
+  "- generate_image: creates an AI image and returns a short imageRef (not the image).",
   "",
   "HUMAN APPROVAL IS MANDATORY: linkedin_draft_post only creates a draft the user approves in the app. Never",
   "claim or imply a post was published unless the approval flow explicitly confirmed it.",
+  "For a post with an image: call generate_image first, then pass the exact imageRef it returns as the",
+  "imageRef argument of linkedin_draft_post - don't try to describe or embed the image itself.",
   "You have NO tool for connecting, following, liking, commenting, or automating any reach/growth activity -",
   "that violates LinkedIn's terms. 'Help me grow my reach' means planning and drafting better content, not automation.",
 ].join("\n");
@@ -80,7 +83,7 @@ const WEB_PROMPT = [
   "- generate_image: generates an AI image and returns a short imageRef (not the image itself).",
   "",
   "You also handle general analysis and summarization of attached documents that appear inline in the request",
-  "text, plus casual questions. Reply concisely. Image posts on LinkedIn aren't supported - draft text-only posts.",
+  "text, plus casual questions. Reply concisely. LinkedIn posts (with or without an image) go to the LinkedIn agent.",
 ].join("\n");
 
 const KNOWLEDGE_PROMPT = [
@@ -135,10 +138,10 @@ const SPECIALIST_TOOL_PLAN: Record<string, { description: string; prompt: string
   },
   linkedin_agent: {
     description:
-      "LinkedIn agent - the user's LinkedIn: reading their tracked post history and drafting a post via the approval flow. Route LinkedIn post/content requests here.",
+      "LinkedIn agent - the user's LinkedIn: reading their tracked post history and drafting a post (text and AI images) via the approval flow. Route LinkedIn post/content requests here.",
     prompt: LINKEDIN_PROMPT,
     mcpToolNames: ["linkedin_list_recent_posts"],
-    backendTools: ["linkedin_draft_post"],
+    backendTools: ["linkedin_draft_post", "generate_image"],
   },
   github_agent: {
     description:

@@ -62,8 +62,8 @@ export async function approvePendingAction(
     const json = await callMcpTool("gmail_send_message", args);
     result = JSON.parse(json);
   } else if (existing.type === "linkedin_post") {
-    const { commentary } = payload as LinkedinActionPayload;
-    const json = await callMcpTool("linkedin_create_post", { commentary, userId });
+    const { commentary, imageRef } = payload as LinkedinActionPayload;
+    const json = await callMcpTool("linkedin_create_post", { commentary, imageRef, userId });
     result = JSON.parse(json);
   } else if (existing.type === "github_issue") {
     const { repo, title, body } = payload as GithubIssueActionPayload;

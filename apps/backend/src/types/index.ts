@@ -51,6 +51,8 @@ export interface ChatAttachment {
 
 export interface LinkedinActionPayload {
   commentary: string;
+  /** imageRef from the generate_image tool, when the draft should carry an AI-generated image. */
+  imageRef?: string;
 }
 
 export interface GithubIssueActionPayload {
