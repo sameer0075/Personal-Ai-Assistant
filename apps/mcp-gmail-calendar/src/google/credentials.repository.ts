@@ -11,10 +11,12 @@ import { decryptSecret } from "../security/token-crypto.js";
  * mcp-tool-adapter.ts, never supplied by the LLM itself), so this always
  * looks up that same user's own connected Google account.
  */
-export async function getStoredRefreshToken(userId: string): Promise<string> {
+export async function getStoredRefreshToken(userId: string, workspaceId?: string): Promise<string> {
   const { rows } = await pool.query<{ refresh_token_encrypted: string }>(
-    `SELECT refresh_token_encrypted FROM google_credentials WHERE user_id = $1`,
-    [userId]
+    workspaceId
+      ? `SELECT refresh_token_encrypted FROM google_credentials WHERE user_id = $1 AND workspace_id = $2`
+      : `SELECT refresh_token_encrypted FROM google_credentials WHERE user_id = $1`,
+    workspaceId ? [userId, workspaceId] : [userId]
   );
 
   if (!rows[0]) {

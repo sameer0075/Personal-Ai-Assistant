@@ -6,12 +6,12 @@ export interface StoredFile {
   base64Data: string;
 }
 
-export async function getStoredFileBySourceType(userId: string, sourceType: string): Promise<StoredFile | null> {
+export async function getStoredFileBySourceType(userId: string, workspaceId: string, sourceType: string): Promise<StoredFile | null> {
   const { rows } = await pool.query<{ title: string; mime_type: string | null; file_data: Buffer | null }>(
     `SELECT title, mime_type, file_data FROM documents
-     WHERE user_id = $1 AND source_type = $2 AND file_data IS NOT NULL
+    WHERE user_id = $1 AND workspace_id = $2 AND source_type = $3 AND file_data IS NOT NULL
      ORDER BY created_at DESC LIMIT 1`,
-    [userId, sourceType]
+    [userId, workspaceId, sourceType]
   );
 
   const row = rows[0];

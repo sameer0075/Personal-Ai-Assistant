@@ -21,14 +21,21 @@ import { tokens } from "@/lib/theme";
 import { getGoogleStatus, GoogleStatus } from "@/lib/api/google";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import Avatar from "@mui/material/Avatar";
+import ToggleButton from "@mui/material/ToggleButton";
+import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
+import PersonOutlineRoundedIcon from "@mui/icons-material/PersonOutlineRounded";
+import WorkOutlineRoundedIcon from "@mui/icons-material/WorkOutlineRounded";
+import AccountTreeRoundedIcon from "@mui/icons-material/AccountTreeRounded";
 import type { ChatSession } from "@/lib/api/sessions";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { useWorkspace } from "@/lib/workspaces/WorkspaceProvider";
 
 const NAV_ITEMS = [
   { href: "/", label: "Chat", icon: ChatBubbleRoundedIcon },
   { href: "/search", label: "Search", icon: SearchRoundedIcon },
   { href: "/automations", label: "Automations", icon: ScheduleRoundedIcon },
   { href: "/integrations", label: "Integrations", icon: HubRoundedIcon },
+  { href: "/departments", label: "Departments", icon: AccountTreeRoundedIcon },
   { href: "/agents", label: "Agents", icon: AutoAwesomeRoundedIcon },
 ];
 
@@ -54,6 +61,7 @@ export default function Sidebar({
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const { user, logout } = useAuth();
+  const { workspaces, activeWorkspace, isLoading: isLoadingWorkspaces, setActiveWorkspaceId } = useWorkspace();
 
   const loadStatus = useCallback(async () => {
     try {
@@ -63,7 +71,7 @@ export default function Sidebar({
     } finally {
       setIsLoadingStatus(false);
     }
-  }, []);
+  }, [activeWorkspace?.id]);
 
   useEffect(() => {
     loadStatus();
@@ -130,6 +138,28 @@ export default function Sidebar({
       >
         Workspace
       </Typography>
+
+      <ToggleButtonGroup
+        exclusive
+        fullWidth
+        size="small"
+        value={activeWorkspace?.kind ?? false}
+        onChange={(_, kind: "personal" | "work" | null) => {
+          const next = workspaces.find((workspace) => workspace.kind === kind);
+          if (next) setActiveWorkspaceId(next.id);
+        }}
+        disabled={isLoadingWorkspaces || workspaces.length === 0}
+        sx={{ mb: 1.5, px: 0.25, "& .MuiToggleButton-root": { borderColor: tokens.border, color: tokens.muted, textTransform: "none", fontSize: 12, py: 0.75 }, "& .Mui-selected": { bgcolor: `${tokens.accentDim} !important`, color: `${tokens.accentBright} !important` } }}
+      >
+        <ToggleButton value="personal"><PersonOutlineRoundedIcon sx={{ fontSize: 15, mr: 0.5 }} />Personal</ToggleButton>
+        <ToggleButton value="work"><WorkOutlineRoundedIcon sx={{ fontSize: 15, mr: 0.5 }} />Work</ToggleButton>
+      </ToggleButtonGroup>
+
+      {activeWorkspace?.kind === "work" && (
+        <Typography sx={{ fontSize: 11, color: tokens.mutedDim, px: 1, mb: 1 }}>
+          {activeWorkspace.departments.length} departments ready
+        </Typography>
+      )}
 
       <Stack spacing={0.5}>
         {NAV_ITEMS.map((item) => {

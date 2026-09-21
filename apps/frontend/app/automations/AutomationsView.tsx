@@ -39,6 +39,7 @@ import {
   type DeliveryMode,
   type DeliveryDefinition,
 } from "@/lib/api/automations";
+import { useWorkspace } from "@/lib/workspaces/WorkspaceProvider";
 
 const DEFAULT_CRON_PRESETS = [
   { expr: "0 9 * * 1-5", label: "Weekdays 9am" },
@@ -523,6 +524,7 @@ function CreateForm({ onCreated }: { onCreated: (task: ScheduledTask) => void })
 }
 
 export default function AutomationsView() {
+  const { activeWorkspace } = useWorkspace();
   const [tasks, setTasks] = useState<ScheduledTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -540,7 +542,7 @@ export default function AutomationsView() {
 
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, activeWorkspace?.id]);
 
   const enabledCount = tasks?.filter((t) => t.enabled).length ?? 0;
 

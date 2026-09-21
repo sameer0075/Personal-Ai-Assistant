@@ -27,6 +27,7 @@ import { GmailMessageSummary, listGmailMessages, syncGmailToRag } from "@/lib/ap
 import { CalendarEventSummary, createCalendarEvent, deleteCalendarEvent, listCalendarEvents, syncCalendarToRag } from "@/lib/api/calendar";
 import { createEmailDraft, PendingAction } from "@/lib/api/actions";
 import { disconnectGoogle, getGoogleAuthUrl, getGoogleStatus, GoogleStatus } from "@/lib/api/google";
+import { useWorkspace } from "@/lib/workspaces/WorkspaceProvider";
 
 function formatEventTime(iso: string): string {
   const date = new Date(iso);
@@ -48,6 +49,7 @@ function CapabilityHeader({ icon, title, action }: { icon: React.ReactNode; titl
 }
 
 export default function GoogleCard({ onConnectedChange }: { onConnectedChange?: (connected: boolean) => void }) {
+  const { activeWorkspace } = useWorkspace();
   const [status, setStatus] = useState<GoogleStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isWorking, setIsWorking] = useState(false);
@@ -87,7 +89,7 @@ export default function GoogleCard({ onConnectedChange }: { onConnectedChange?: 
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [activeWorkspace?.id]);
 
   useEffect(() => {
     refresh();

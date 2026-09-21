@@ -35,27 +35,28 @@ async function refreshAccessToken(refreshToken: string): Promise<CachedAccessTok
   };
 }
 
-export async function getGoogleAuthClient(userId: string) {
-  const refreshToken = await getStoredRefreshToken(userId);
+export async function getGoogleAuthClient(userId: string, workspaceId?: string) {
+  const refreshToken = await getStoredRefreshToken(userId, workspaceId);
   const client = buildClient(refreshToken);
 
-  const cached = tokenCache.get(userId);
+  const cacheKey = `${userId}:${workspaceId ?? "personal"}`;
+  const cached = tokenCache.get(cacheKey);
   if (cached && cached.expiryDate - EXPIRY_SAFETY_MARGIN_MS > Date.now()) {
     client.setCredentials({ refresh_token: refreshToken, access_token: cached.accessToken });
     return client;
   }
 
-  let refreshPromise = refreshesInFlight.get(userId);
+  let refreshPromise = refreshesInFlight.get(cacheKey);
   if (!refreshPromise) {
     refreshPromise = refreshAccessToken(refreshToken)
       .then((token) => {
-        tokenCache.set(userId, token);
+        tokenCache.set(cacheKey, token);
         return token;
       })
       .finally(() => {
-        refreshesInFlight.delete(userId);
+        refreshesInFlight.delete(cacheKey);
       });
-    refreshesInFlight.set(userId, refreshPromise);
+    refreshesInFlight.set(cacheKey, refreshPromise);
   }
 
   const token = await refreshPromise;

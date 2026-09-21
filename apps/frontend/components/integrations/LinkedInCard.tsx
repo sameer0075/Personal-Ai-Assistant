@@ -20,10 +20,12 @@ import ActionApprovalModal from "../ActionApprovalModal";
 import { deleteLinkedinPost, LinkedinPost, listLinkedinPosts, syncLinkedinToRag } from "@/lib/api/linkedin";
 import { createLinkedinDraft, PendingAction } from "@/lib/api/actions";
 import { disconnectLinkedin, getLinkedinAuthUrl, getLinkedinStatus, LinkedinStatus } from "@/lib/api/linkedin-auth";
+import { useWorkspace } from "@/lib/workspaces/WorkspaceProvider";
 
 const MAX_CHARS = 3000;
 
 export default function LinkedInCard({ onConnectedChange }: { onConnectedChange?: (connected: boolean) => void }) {
+  const { activeWorkspace } = useWorkspace();
   const [status, setStatus] = useState<LinkedinStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isWorking, setIsWorking] = useState(false);
@@ -48,7 +50,7 @@ export default function LinkedInCard({ onConnectedChange }: { onConnectedChange?
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [activeWorkspace?.id]);
 
   useEffect(() => {
     refresh();

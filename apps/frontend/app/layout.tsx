@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import ThemeRegistry from "./ThemeRegistry";
 import { AuthProvider } from "@/lib/auth/AuthProvider";
+import { WorkspaceProvider } from "@/lib/workspaces/WorkspaceProvider";
 import "./globals.css";
 
 const bodyFont = Inter({ subsets: ["latin"], variable: "--font-body" });
@@ -17,7 +18,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${bodyFont.variable} ${monoFont.variable}`}>
       <body>
         <ThemeRegistry>
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider>
+            <WorkspaceProvider>{children}</WorkspaceProvider>
+          </AuthProvider>
         </ThemeRegistry>
       </body>
     </html>

@@ -3,7 +3,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as gmailClient from "../google/gmail.client.js";
 import { jsonResult, errorResult } from "./tool-result.js";
 import { getStoredFileBySourceType } from "../google/document-file.repository.js";
-import { requireUserId } from "./require-user-id.js";
+import { requireUserId, requireWorkspaceId } from "./require-user-id.js";
 
 /**
  * Every tool below declares a `userId` field. It is never something the
@@ -22,6 +22,7 @@ import { requireUserId } from "./require-user-id.js";
  * and paraphrase for the user.
  */
 const userIdField = z.string().uuid().optional().describe("Injected server-side - identifies which user's Google account to use");
+const workspaceIdField = z.string().uuid().optional().describe("Injected server-side - identifies the active workspace");
 
 export function registerGmailTools(server: McpServer): void {
   server.registerTool(
@@ -36,12 +37,14 @@ export function registerGmailTools(server: McpServer): void {
         query: z.string().optional().describe("Gmail search syntax, e.g. 'is:unread from:someone@example.com'"),
         maxResults: z.number().int().min(1).max(50).optional().describe("Max messages to return (default 20)"),
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ query, maxResults, userId }) => {
+    async ({ query, maxResults, userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
-        const messages = await gmailClient.listMessages(uid, { query, maxResults });
+        const wid = requireWorkspaceId(workspaceId);
+        const messages = await gmailClient.listMessages(uid, wid, { query, maxResults });
         return jsonResult(messages);
       } catch (err) {
         return errorResult(err);
@@ -57,12 +60,14 @@ export function registerGmailTools(server: McpServer): void {
       inputSchema: {
         messageId: z.string().describe("The Gmail message ID, from gmail_list_messages"),
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ messageId, userId }) => {
+    async ({ messageId, userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
-        const message = await gmailClient.getMessage(uid, messageId);
+        const wid = requireWorkspaceId(workspaceId);
+        const message = await gmailClient.getMessage(uid, wid, messageId);
         return jsonResult(message);
       } catch (err) {
         return errorResult(err);
@@ -89,15 +94,17 @@ export function registerGmailTools(server: McpServer): void {
           .optional()
           .describe("Set true to attach the user's most recently uploaded CV file to this email"),
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ to, subject, body, cc, attachCv, userId }) => {
+    async ({ to, subject, body, cc, attachCv, userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
+        const wid = requireWorkspaceId(workspaceId);
         let attachment: { filename: string; mimeType: string; base64Data: string } | undefined;
 
         if (attachCv) {
-          const file = await getStoredFileBySourceType(uid, "cv");
+          const file = await getStoredFileBySourceType(uid, wid, "cv");
           if (!file) {
             return errorResult(
               new Error("No CV file is on record to attach. Ask the user to upload their CV first.")
@@ -106,7 +113,7 @@ export function registerGmailTools(server: McpServer): void {
           attachment = file;
         }
 
-        const result = await gmailClient.sendMessage(uid, { to, subject, body, cc, attachment });
+        const result = await gmailClient.sendMessage(uid, wid, { to, subject, body, cc, attachment });
         return jsonResult({ sent: true, attached: Boolean(attachment), ...result });
       } catch (err) {
         return errorResult(err);
@@ -128,22 +135,24 @@ export function registerGmailTools(server: McpServer): void {
         body: z.string().min(1).describe("Plain-text email body, same for every recipient"),
         attachCv: z.boolean().optional().describe("Set true to attach the user's most recently uploaded CV to every email"),
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ recipients, subject, body, attachCv, userId }) => {
+    async ({ recipients, subject, body, attachCv, userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
+        const wid = requireWorkspaceId(workspaceId);
         let attachment: { filename: string; mimeType: string; base64Data: string } | undefined;
 
         if (attachCv) {
-          const file = await getStoredFileBySourceType(uid, "cv");
+          const file = await getStoredFileBySourceType(uid, wid, "cv");
           if (!file) {
             return errorResult(new Error("No CV file is on record to attach. Ask the user to upload their CV first."));
           }
           attachment = file;
         }
 
-        const results = await gmailClient.sendBulkMessages(uid, { recipients, subject, body, attachment });
+        const results = await gmailClient.sendBulkMessages(uid, wid, { recipients, subject, body, attachment });
         const sent = results.filter((r) => r.sent).length;
         const failed = results.filter((r) => !r.sent);
 

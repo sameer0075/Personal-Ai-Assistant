@@ -14,6 +14,7 @@ import { requireUserId } from "./require-user-id.js";
  * key out of the incoming arguments before our handler ever sees it.
  */
 const userIdField = z.string().uuid().optional().describe("Injected server-side - identifies which user's GitHub account to use");
+const workspaceIdField = z.string().uuid().optional().describe("Injected server-side - identifies the active workspace");
 
 export function registerGithubTools(server: McpServer): void {
   server.registerTool(
@@ -25,12 +26,13 @@ export function registerGithubTools(server: McpServer): void {
         "against GitHub as it does so). Used at connect time; harmless to call anytime.",
       inputSchema: {
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ userId }) => {
+    async ({ userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
-        const user = await githubClient.getStoredAccount(uid);
+        const user = await githubClient.getStoredAccount(uid, workspaceId);
         return jsonResult(user);
       } catch (err) {
         return errorResult(err);
@@ -47,12 +49,13 @@ export function registerGithubTools(server: McpServer): void {
         "Useful as a first step before listing issues - give the user repo names as 'owner/repo'.",
       inputSchema: {
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ userId }) => {
+    async ({ userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
-        return jsonResult(await githubClient.listRepos(uid));
+        return jsonResult(await githubClient.listRepos(uid, 30, workspaceId));
       } catch (err) {
         return errorResult(err);
       }
@@ -71,12 +74,13 @@ export function registerGithubTools(server: McpServer): void {
         state: z.enum(["open", "closed", "all"]).optional().describe("Default: open"),
         perPage: z.number().int().min(1).max(100).optional().describe("Default: 30"),
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ repo, state, perPage, userId }) => {
+    async ({ repo, state, perPage, userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
-        return jsonResult(await githubClient.listRepoIssues(uid, repo as string, state ?? "open", perPage ?? 30));
+        return jsonResult(await githubClient.listRepoIssues(uid, repo as string, state ?? "open", perPage ?? 30, workspaceId));
       } catch (err) {
         return errorResult(err);
       }
@@ -94,12 +98,13 @@ export function registerGithubTools(server: McpServer): void {
         q: z.string().min(1).describe("GitHub search query"),
         perPage: z.number().int().min(1).max(100).optional().describe("Default: 20"),
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ q, perPage, userId }) => {
+    async ({ q, perPage, userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
-        return jsonResult(await githubClient.searchIssues(uid, q as string, perPage ?? 20));
+        return jsonResult(await githubClient.searchIssues(uid, q as string, perPage ?? 20, workspaceId));
       } catch (err) {
         return errorResult(err);
       }
@@ -117,12 +122,13 @@ export function registerGithubTools(server: McpServer): void {
         state: z.enum(["open", "closed", "all"]).optional().describe("Default: open"),
         perPage: z.number().int().min(1).max(100).optional().describe("Default: 30"),
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ repo, state, perPage, userId }) => {
+    async ({ repo, state, perPage, userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
-        return jsonResult(await githubClient.listRepoPulls(uid, repo as string, state ?? "open", perPage ?? 30));
+        return jsonResult(await githubClient.listRepoPulls(uid, repo as string, state ?? "open", perPage ?? 30, workspaceId));
       } catch (err) {
         return errorResult(err);
       }
@@ -140,12 +146,13 @@ export function registerGithubTools(server: McpServer): void {
         repo: z.string().describe("Repository as 'owner/repo', e.g. 'octocat/Hello-World'"),
         number: z.number().int().positive().describe("Issue (or PR) number"),
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ repo, number, userId }) => {
+    async ({ repo, number, userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
-        return jsonResult(await githubClient.getIssue(uid, repo as string, number as number));
+        return jsonResult(await githubClient.getIssue(uid, repo as string, number as number, workspaceId));
       } catch (err) {
         return errorResult(err);
       }
@@ -164,12 +171,13 @@ export function registerGithubTools(server: McpServer): void {
         repo: z.string().describe("Repository as 'owner/repo', e.g. 'octocat/Hello-World'"),
         number: z.number().int().positive().describe("Pull request number"),
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ repo, number, userId }) => {
+    async ({ repo, number, userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
-        return jsonResult(await githubClient.getPull(uid, repo as string, number as number));
+        return jsonResult(await githubClient.getPull(uid, repo as string, number as number, workspaceId));
       } catch (err) {
         return errorResult(err);
       }
@@ -189,12 +197,13 @@ export function registerGithubTools(server: McpServer): void {
         number: z.number().int().positive().describe("Pull request number"),
         perPage: z.number().int().min(1).max(100).optional().describe("Default: 30"),
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ repo, number, perPage, userId }) => {
+    async ({ repo, number, perPage, userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
-        return jsonResult(await githubClient.listPullFiles(uid, repo as string, number as number, perPage ?? 30));
+        return jsonResult(await githubClient.listPullFiles(uid, repo as string, number as number, perPage ?? 30, workspaceId));
       } catch (err) {
         return errorResult(err);
       }
@@ -213,12 +222,13 @@ export function registerGithubTools(server: McpServer): void {
         title: z.string().min(1).max(512).describe("Issue title"),
         body: z.string().max(150_000).optional().describe("Issue body (markdown)"),
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ repo, title, body, userId }) => {
+    async ({ repo, title, body, userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
-        return jsonResult(await githubClient.createIssue(uid, repo as string, title as string, body as string | null));
+        return jsonResult(await githubClient.createIssue(uid, repo as string, title as string, body as string | null, workspaceId));
       } catch (err) {
         return errorResult(err);
       }
@@ -237,12 +247,13 @@ export function registerGithubTools(server: McpServer): void {
         issueNumber: z.number().int().positive().describe("Issue or pull request number"),
         body: z.string().min(1).max(150_000).describe("Comment body (markdown)"),
         userId: userIdField,
+        workspaceId: workspaceIdField,
       },
     },
-    async ({ repo, issueNumber, body, userId }) => {
+    async ({ repo, issueNumber, body, userId, workspaceId }) => {
       try {
         const uid = requireUserId(userId);
-        return jsonResult(await githubClient.createIssueComment(uid, repo as string, issueNumber as number, body as string));
+        return jsonResult(await githubClient.createIssueComment(uid, repo as string, issueNumber as number, body as string, workspaceId));
       } catch (err) {
         return errorResult(err);
       }

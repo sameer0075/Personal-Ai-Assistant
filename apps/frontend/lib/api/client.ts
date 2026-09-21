@@ -12,6 +12,10 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   const token = getToken();
   const headers = new Headers(init?.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (typeof window !== "undefined") {
+    const workspaceId = window.localStorage.getItem("activeWorkspaceId");
+    if (workspaceId) headers.set("X-Workspace-Id", workspaceId);
+  }
 
   const res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
 
@@ -33,6 +37,23 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   if (res.status === 204) return undefined as T;
   return res.json();
+}
+
+/** Authenticated binary download (e.g. an uploaded CV) as a Blob. */
+export async function apiBlob(path: string): Promise<Blob> {
+  const headers = new Headers();
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (typeof window !== "undefined") {
+    const workspaceId = window.localStorage.getItem("activeWorkspaceId");
+    if (workspaceId) headers.set("X-Workspace-Id", workspaceId);
+  }
+  const res = await fetch(`${API_BASE_URL}${path}`, { headers });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Request failed with status ${res.status}`);
+  }
+  return res.blob();
 }
 
 /** POST/PATCH/DELETE with a JSON body. */

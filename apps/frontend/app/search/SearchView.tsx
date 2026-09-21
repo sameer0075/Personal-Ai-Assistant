@@ -30,6 +30,7 @@ import {
   type UnifiedSearchSource,
   type UnifiedSearchResult,
 } from "@/lib/api/search";
+import { useWorkspace } from "@/lib/workspaces/WorkspaceProvider";
 
 const SNIPPET_PREVIEW_CHARS = 260;
 const RESULT_LIMIT = 8;
@@ -264,6 +265,7 @@ function EmptyState({ query }: { query: string }) {
 }
 
 export default function SearchView() {
+  const { activeWorkspace } = useWorkspace();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [result, setResult] = useState<UnifiedSearchResult | null>(null);
@@ -308,7 +310,7 @@ export default function SearchView() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery]);
+  }, [debouncedQuery, activeWorkspace?.id]);
 
   const totalHits = useMemo(
     () => result?.groups.reduce((sum, g) => sum + g.hits.length, 0) ?? 0,

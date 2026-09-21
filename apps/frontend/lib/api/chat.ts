@@ -133,6 +133,10 @@ async function streamFetch(path: string, init: RequestInit, handlers: ChatStream
   const token = getToken();
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (typeof window !== "undefined") {
+    const workspaceId = window.localStorage.getItem("activeWorkspaceId");
+    if (workspaceId) headers.set("X-Workspace-Id", workspaceId);
+  }
 
   const res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, signal: init.signal });
 

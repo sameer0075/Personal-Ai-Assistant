@@ -24,3 +24,8 @@ export function requireUserId(userId: string | undefined): string {
   }
   return userId;
 }
+
+export function requireWorkspaceId(workspaceId: string | undefined): string {
+  if (!workspaceId) throw new Error("No workspace reached this integration tool call. Restart the backend and MCP server, then try again.");
+  return workspaceId;
+}

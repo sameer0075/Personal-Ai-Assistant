@@ -14,8 +14,10 @@ import { tokens } from "@/lib/theme";
 import { GithubLogo, BrandTile } from "./BrandLogo";
 import IntegrationCard, { panelCardSx } from "./IntegrationCard";
 import { connectGithub, disconnectGithub, getGithubStatus, GithubStatus, syncGithub } from "@/lib/api/github";
+import { useWorkspace } from "@/lib/workspaces/WorkspaceProvider";
 
 export default function GithubCard({ onConnectedChange }: { onConnectedChange?: (connected: boolean) => void }) {
+  const { activeWorkspace } = useWorkspace();
   const [status, setStatus] = useState<GithubStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isWorking, setIsWorking] = useState(false);
@@ -32,7 +34,7 @@ export default function GithubCard({ onConnectedChange }: { onConnectedChange?: 
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [activeWorkspace?.id]);
 
   useEffect(() => {
     refresh();

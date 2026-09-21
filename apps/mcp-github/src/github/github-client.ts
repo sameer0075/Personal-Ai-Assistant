@@ -18,8 +18,8 @@ export function parseRepoRef(repo: string): RepoRef {
 const API_ROOT = "https://api.github.com";
 
 /** Scoped by userId for multi-user support - each user acts as their own GitHub identity. */
-async function request<T>(userId: string, path: string, init?: RequestInit): Promise<T> {
-  const token = await githubCredentialsRepository.getValidToken(userId);
+async function request<T>(userId: string, path: string, init?: RequestInit, workspaceId?: string): Promise<T> {
+  const token = await githubCredentialsRepository.getValidToken(userId, workspaceId);
   if (!token) {
     throw new Error("No GitHub account is connected for this user. Ask them to connect one in Integrations first.");
   }
@@ -70,8 +70,8 @@ export async function getAuthenticatedUser(token: string): Promise<{ login: stri
 }
 
 /** Resolves the account for the token we already have stored for this user. */
-export async function getStoredAccount(userId: string): Promise<{ login: string; email: string | null }> {
-  const token = await githubCredentialsRepository.getValidToken(userId);
+export async function getStoredAccount(userId: string, workspaceId?: string): Promise<{ login: string; email: string | null }> {
+  const token = await githubCredentialsRepository.getValidToken(userId, workspaceId);
   if (!token) {
     throw new Error("No GitHub account is connected for this user.");
   }
@@ -190,8 +190,8 @@ interface RestPullFile {
   patch?: string;
 }
 
-export async function listRepos(userId: string, perPage = 30): Promise<GithubRepoSummary[]> {
-  const repos = await request<RestRepo[]>(userId, `/user/repos?per_page=${perPage}&sort=updated`);
+export async function listRepos(userId: string, perPage = 30, workspaceId?: string): Promise<GithubRepoSummary[]> {
+  const repos = await request<RestRepo[]>(userId, `/user/repos?per_page=${perPage}&sort=updated`, undefined, workspaceId);
   return repos.map((r) => ({
     fullName: r.full_name,
     description: r.description,
@@ -205,10 +205,11 @@ export async function listRepoIssues(
   userId: string,
   repo: string,
   state: "open" | "closed" | "all" = "open",
-  perPage = 30
+  perPage = 30,
+  workspaceId?: string
 ): Promise<GithubIssueSummary[]> {
   const ref = parseRepoRef(repo);
-  const issues = await request<RestIssue[]>(userId, `/repos/${ref.owner}/${ref.repo}/issues?state=${state}&per_page=${perPage}`);
+  const issues = await request<RestIssue[]>(userId, `/repos/${ref.owner}/${ref.repo}/issues?state=${state}&per_page=${perPage}`, undefined, workspaceId);
   return issues.filter((i) => !i.pull_request).map(toIssueSummary);
 }
 
@@ -227,8 +228,8 @@ function toIssueSummary(issue: RestIssue): GithubIssueSummary {
   };
 }
 
-export async function searchIssues(userId: string, query: string, perPage = 20): Promise<GithubIssueSummary[]> {
-  const result = await request<{ items: RestIssue[] }>(userId, `/search/issues?q=${encodeURIComponent(query)}&per_page=${perPage}`);
+export async function searchIssues(userId: string, query: string, perPage = 20, workspaceId?: string): Promise<GithubIssueSummary[]> {
+  const result = await request<{ items: RestIssue[] }>(userId, `/search/issues?q=${encodeURIComponent(query)}&per_page=${perPage}`, undefined, workspaceId);
   return result.items.filter((i) => !i.pull_request).map(toIssueSummary);
 }
 
@@ -236,10 +237,11 @@ export async function listRepoPulls(
   userId: string,
   repo: string,
   state: "open" | "closed" | "all" = "open",
-  perPage = 30
+  perPage = 30,
+  workspaceId?: string
 ): Promise<GithubPullSummary[]> {
   const ref = parseRepoRef(repo);
-  const pulls = await request<RestPull[]>(userId, `/repos/${ref.owner}/${ref.repo}/pulls?state=${state}&per_page=${perPage}`);
+  const pulls = await request<RestPull[]>(userId, `/repos/${ref.owner}/${ref.repo}/pulls?state=${state}&per_page=${perPage}`, undefined, workspaceId);
   return pulls.map((p) => ({
     number: p.number,
     title: p.title,
@@ -251,16 +253,16 @@ export async function listRepoPulls(
   }));
 }
 
-export async function getIssue(userId: string, repo: string, number: number): Promise<GithubIssueSummary> {
+export async function getIssue(userId: string, repo: string, number: number, workspaceId?: string): Promise<GithubIssueSummary> {
   const ref = parseRepoRef(repo);
-  const issue = await request<RestIssue>(userId, `/repos/${ref.owner}/${ref.repo}/issues/${number}`);
+  const issue = await request<RestIssue>(userId, `/repos/${ref.owner}/${ref.repo}/issues/${number}`, undefined, workspaceId);
   return toIssueSummary(issue);
 }
 
 /** Full PR detail - for reviewing/analyzing a pull request (head/base, stats, mergeability). */
-export async function getPull(userId: string, repo: string, number: number): Promise<GithubPullDetail> {
+export async function getPull(userId: string, repo: string, number: number, workspaceId?: string): Promise<GithubPullDetail> {
   const ref = parseRepoRef(repo);
-  const pull = await request<RestPullDetail>(userId, `/repos/${ref.owner}/${ref.repo}/pulls/${number}`);
+  const pull = await request<RestPullDetail>(userId, `/repos/${ref.owner}/${ref.repo}/pulls/${number}`, undefined, workspaceId);
   return {
     number: pull.number,
     title: pull.title,
@@ -285,12 +287,15 @@ export async function listPullFiles(
   userId: string,
   repo: string,
   number: number,
-  perPage = 30
+  perPage = 30,
+  workspaceId?: string
 ): Promise<GithubPullFile[]> {
   const ref = parseRepoRef(repo);
   const files = await request<RestPullFile[]>(
     userId,
-    `/repos/${ref.owner}/${ref.repo}/pulls/${number}/files?per_page=${perPage}`
+    `/repos/${ref.owner}/${ref.repo}/pulls/${number}/files?per_page=${perPage}`,
+    undefined,
+    workspaceId
   );
   return files.map((f) => ({
     filename: f.filename,
@@ -306,13 +311,14 @@ export async function createIssue(
   userId: string,
   repo: string,
   title: string,
-  body: string | null
+  body: string | null,
+  workspaceId?: string
 ): Promise<GithubIssueSummary> {
   const ref = parseRepoRef(repo);
   const issue = await request<RestIssue>(userId, `/repos/${ref.owner}/${ref.repo}/issues`, {
     method: "POST",
     body: JSON.stringify({ title, ...(body ? { body } : {}) }),
-  });
+  }, workspaceId);
   return toIssueSummary(issue);
 }
 
@@ -320,13 +326,15 @@ export async function createIssueComment(
   userId: string,
   repo: string,
   issueNumber: number,
-  body: string
+  body: string,
+  workspaceId?: string
 ): Promise<{ id: number; htmlUrl: string }> {
   const ref = parseRepoRef(repo);
   const comment = await request<{ id: number; html_url: string }>(
     userId,
     `/repos/${ref.owner}/${ref.repo}/issues/${issueNumber}/comments`,
-    { method: "POST", body: JSON.stringify({ body }) }
+    { method: "POST", body: JSON.stringify({ body }) },
+    workspaceId
   );
   return { id: comment.id, htmlUrl: comment.html_url };
 }

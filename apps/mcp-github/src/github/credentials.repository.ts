@@ -9,17 +9,19 @@ import { env } from "../config/env.js";
  * this process, so the DB here matches the backend's by construction).
  */
 export const githubCredentialsRepository = {
-  async getEncryptedToken(userId: string): Promise<string | null> {
+  async getEncryptedToken(userId: string, workspaceId?: string): Promise<string | null> {
     const { rows } = await pool.query<{ github_token_encrypted: string }>(
-      `SELECT github_token_encrypted FROM github_credentials WHERE user_id = $1`,
-      [userId]
+      workspaceId
+        ? `SELECT github_token_encrypted FROM github_credentials WHERE user_id = $1 AND workspace_id = $2`
+        : `SELECT github_token_encrypted FROM github_credentials WHERE user_id = $1`,
+      workspaceId ? [userId, workspaceId] : [userId]
     );
     return rows[0]?.github_token_encrypted ?? null;
   },
 
   /** The live PAT, or null when this user has no GitHub account connected. */
-  async getValidToken(userId: string): Promise<string | null> {
-    const encrypted = await this.getEncryptedToken(userId);
+  async getValidToken(userId: string, workspaceId?: string): Promise<string | null> {
+    const encrypted = await this.getEncryptedToken(userId, workspaceId);
     if (!encrypted) return null;
     return decryptSecret(encrypted, env.GITHUB_TOKEN_ENCRYPTION_KEY);
   },

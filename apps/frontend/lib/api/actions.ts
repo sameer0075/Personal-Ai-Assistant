@@ -1,6 +1,6 @@
 import { apiFetch, apiJson } from "./client";
 
-export type PendingActionType = "email" | "linkedin_post" | "github_issue" | "github_comment";
+export type PendingActionType = "email" | "linkedin_post" | "github_issue" | "github_comment" | "hr_event_invite";
 export type PendingActionStatus = "pending" | "approved" | "rejected";
 
 export interface EmailActionPayload {
@@ -29,11 +29,26 @@ export interface GithubCommentActionPayload {
   body: string;
 }
 
+export interface HrEventInvitePayload {
+  hrEventId: string;
+  summary: string;
+  description?: string;
+  startDateTime: string;
+  endDateTime: string;
+  timeZone?: string;
+  recipients: Array<{ employeeId: string; name: string; email: string }>;
+  addToCalendar: boolean;
+  sendEmail: boolean;
+  emailSubject?: string;
+  emailBody?: string;
+}
+
 export type ActionPayload =
   | EmailActionPayload
   | LinkedinActionPayload
   | GithubIssueActionPayload
-  | GithubCommentActionPayload;
+  | GithubCommentActionPayload
+  | HrEventInvitePayload;
 
 export interface PendingAction {
   id: string;

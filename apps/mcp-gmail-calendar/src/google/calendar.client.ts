@@ -10,8 +10,8 @@ export interface CalendarEventSummary {
   attendees: string[];
 }
 
-async function getCalendarClient(userId: string): Promise<calendar_v3.Calendar> {
-  const auth = await getGoogleAuthClient(userId);
+async function getCalendarClient(userId: string, workspaceId: string): Promise<calendar_v3.Calendar> {
+  const auth = await getGoogleAuthClient(userId, workspaceId);
   return google.calendar({ version: "v3", auth });
 }
 
@@ -28,9 +28,10 @@ function toSummary(event: calendar_v3.Schema$Event): CalendarEventSummary {
 
 export async function listEvents(
   userId: string,
+  workspaceId: string,
   params: { timeMin?: string; timeMax?: string; maxResults?: number }
 ): Promise<CalendarEventSummary[]> {
-  const calendar = await getCalendarClient(userId);
+  const calendar = await getCalendarClient(userId, workspaceId);
   const { data } = await calendar.events.list({
     calendarId: "primary",
     timeMin: params.timeMin ?? new Date().toISOString(),
@@ -44,11 +45,14 @@ export async function listEvents(
 
 export async function createEvent(
   userId: string,
-  params: { summary: string; description?: string; startDateTime: string; endDateTime: string; timeZone?: string; attendees?: string[] }
+  workspaceId: string,
+  params: { summary: string; description?: string; startDateTime: string; endDateTime: string; timeZone?: string; attendees?: string[]; sendUpdates?: "all" | "none" }
 ): Promise<CalendarEventSummary> {
-  const calendar = await getCalendarClient(userId);
+  const calendar = await getCalendarClient(userId, workspaceId);
   const { data } = await calendar.events.insert({
     calendarId: "primary",
+    // "all" makes Google email each attendee an invitation; the default sends nothing.
+    sendUpdates: params.sendUpdates ?? "none",
     requestBody: {
       summary: params.summary,
       description: params.description,
@@ -60,7 +64,7 @@ export async function createEvent(
   return toSummary(data);
 }
 
-export async function deleteEvent(userId: string, eventId: string): Promise<void> {
-  const calendar = await getCalendarClient(userId);
+export async function deleteEvent(userId: string, workspaceId: string, eventId: string): Promise<void> {
+  const calendar = await getCalendarClient(userId, workspaceId);
   await calendar.events.delete({ calendarId: "primary", eventId });
 }

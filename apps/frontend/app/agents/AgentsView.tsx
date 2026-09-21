@@ -17,6 +17,7 @@ import Sidebar from "@/components/Sidebar";
 import { tokens } from "@/lib/theme";
 import { GithubLogo } from "@/components/integrations/BrandLogo";
 import { getAgentRoster, type AgentRoster, type SpecialistInfo } from "@/lib/api/agents";
+import { useWorkspace } from "@/lib/workspaces/WorkspaceProvider";
 
 // ---------------------------------------------------------------------------
 // Hero geometry: specialists evenly spaced around a center core. Positions are
@@ -340,6 +341,7 @@ function SpecialistCard({ specialist, index }: { specialist: SpecialistInfo; ind
 // Main view
 // ---------------------------------------------------------------------------
 export default function AgentsView() {
+  const { activeWorkspace } = useWorkspace();
   const [roster, setRoster] = useState<AgentRoster | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -387,6 +389,7 @@ export default function AgentsView() {
         ) : (
           <Container maxWidth="sm" sx={{ py: 4 }}>
             <Stack spacing={4}>
+              {activeWorkspace?.kind === "work" && <Chip label="Work workspace agents" sx={{ alignSelf: "flex-start", bgcolor: tokens.accentDim, color: tokens.accentBright }} />}
               {/* Hero */}
               <Hero roster={roster} />
 
@@ -424,7 +427,7 @@ export default function AgentsView() {
               </Typography>
 
               {/* Specialist cards */}
-              {roster.specialists.map((spec, i) => (
+              {roster.specialists.filter((spec) => activeWorkspace?.kind === "work" ? ["hr_agent", "github_agent", "email_agent", "calendar_agent"].includes(spec.name) : spec.name !== "hr_agent").map((spec, i) => (
                 <SpecialistCard key={spec.name} specialist={spec} index={i} />
               ))}
             </Stack>

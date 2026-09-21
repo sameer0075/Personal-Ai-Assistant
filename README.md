@@ -1,94 +1,229 @@
-# Personal AI Assistant — Module 1: CV-aware RAG
+# Personal AI Assistant
 
-This is the first module of the assistant: upload your CV, ask questions about
-yourself, and get answers grounded in your own document via Retrieval-Augmented
-Generation. Everything else you described (Gmail, Calendar, LinkedIn, GitHub/
-Bitbucket PR review, a coding agent) plugs into this same foundation later —
-each becomes a new LangGraph node and a new `sourceType` in the same vector
-store, not a rewrite.
+A full-stack personal productivity and research assistant built as a monorepo. It combines RAG over your own knowledge, multi-agent orchestration, OAuth-connected integrations, automation scheduling, and a desktop workspace assistant.
 
-## Why these choices
+## Project overview
 
-| Concern | Choice | Why |
-|---|---|---|
-| Orchestration | **LangGraph** (not a plain LangChain chain) | You want the assistant to *plan and execute* multi-step work later (draft → review → send, or retrieve PRs → comment). LangGraph models that as a graph of nodes with shared state, which a single chain can't express well. A chain here would need rewriting later; a graph just grows new nodes. |
-| LLM | **Gemini 3.1 Flash-Lite** | Free tier with rate limits, current generation, cheapest paid fallback ($0.25/$1.50 per 1M tokens) if you outgrow it. Swappable in one file (`llm.provider.ts`). |
-| Embeddings | **Xenova/transformers.js** (`all-MiniLM-L6-v2`, 384-dim) | Runs 100% locally, zero API cost, no network call per chunk. This is what makes ingesting a CV free no matter how many times you re-upload it. |
-| Vector store | **Postgres + pgvector, HNSW index** | You said Docker Postgres now, Supabase later — Supabase *is* Postgres+pgvector, so this code doesn't change when you migrate, only `DATABASE_URL`. |
-| Backend | Express + TypeScript, layered (`routes` → `modules/*` → `db`) | Each `modules/<domain>` folder (rag, embeddings, llm, agent) is self-contained enough to become its own microservice later without restructuring. |
-| Frontend | Next.js (App Router) + TypeScript | Minimal now; same pattern (typed `lib/api.ts` client + route handlers) extends to a chat UI for every future module. |
+This project is a real working assistant, not just a prototype. The backend exposes authenticated APIs for chat, documents, search, Google/Gmail/Calendar, LinkedIn, GitHub, and scheduled automations. The frontend is a Next.js app with a chat UI, search view, integrations dashboard, agent roster, and automation management. The desktop app adds a workspace-aware coding assistant for local project work.
 
-## Project layout
+## Core features
+
+### 1. Personal knowledge base with CV/document ingestion
+- Upload PDF, DOCX, and TXT files into the system
+- Classify them by source type: `cv`, `email`, `pr`, `linkedin`, `calendar`, or `general`
+- Parse and chunk document text for vector retrieval
+- Store embeddings in Postgres with pgvector
+- Answer questions grounded in the user’s own uploaded data and indexed knowledge
+
+### 2. Chat assistant with long-lived sessions
+- Authenticated chat sessions stored per user
+- Streaming chat responses using SSE
+- Message editing and rerun flow
+- Persistent assistant history and recall indexing
+- Tool-call tracing and assistant metadata in chat responses
+
+### 3. Multi-agent orchestration
+- Supervisor agent routes requests to specialized agents
+- Specialists include:
+  - Email agent
+  - Calendar agent
+  - LinkedIn agent
+  - GitHub agent
+  - Web/general agent
+  - Knowledge agent
+- Each specialist can call MCP tools and backend tools within a narrow scope
+- Approval-gated actions require human confirmation before sending, publishing, or creating external artifacts
+
+### 4. Gmail and Google Calendar integration
+- Google OAuth sign-in flow
+- Gmail message listing and reading
+- Gmail sending and bulk-send support
+- Calendar event listing, creation, and deletion
+- Sync Gmail and Calendar data into the personal knowledge base for later retrieval
+
+### 5. LinkedIn integration
+- LinkedIn OAuth login flow
+- LinkedIn post creation, listing, and deletion
+- Drafting posts through approval before they are published
+- Sync recent LinkedIn activity into the personal knowledge base
+
+### 6. GitHub integration
+- GitHub auth connection and status checks
+- Repository, issue, and pull request read access
+- PR diff inspection and review flow
+- Draft issue/comment creation queued for approval
+- GitHub actions can be orchestrated through the agent system
+
+### 7. Search across everything the assistant knows
+- Unified semantic/keyword search across:
+  - chat history
+  - document knowledge
+  - emails
+  - calendar events
+  - LinkedIn posts
+- Results grouped by source with relevance metadata
+
+### 8. Scheduled automations
+- Create one-off, interval, or cron-based automations
+- Deliver results to chat, email, or both
+- Run tasks immediately or on schedule
+- Automated worker wakes up and executes due jobs
+
+### 9. Human approval workflow for sensitive actions
+- Draft actions are created as pending actions
+- User can approve or reject before real external operations execute
+- This applies to email drafts, LinkedIn drafts, and GitHub issue/comment drafts
+
+### 10. Desktop coding assistant
+- Electron app for local workspace-aware agent work
+- Connects to MCP servers and workspace filesystem tools
+- Supports approval-aware tool execution in the desktop environment
+
+### 11. Voice + UI experience
+- Voice-first composer and speech-to-text support in the frontend
+- Text-to-speech output for assistant responses
+- Modern dashboard UI built with Next.js and MUI
+
+## Architecture
 
 ```
-ai-assistant/
-├── docker-compose.yml          # Postgres + pgvector
+Personal-Ai-Assistant/
+├── docker-compose.yml
+├── package.json
+├── README.md
 ├── apps/
-│   ├── backend/
-│   │   └── src/
-│   │       ├── config/         # env validation, DB pool
-│   │       ├── db/             # SQL migrations + runner
-│   │       ├── modules/
-│   │       │   ├── embeddings/ # Xenova local embedding service
-│   │       │   ├── parsing/    # pdf/docx/txt -> plain text
-│   │       │   ├── rag/        # chunking, ingest, retrieve, repository
-│   │       │   ├── llm/        # Gemini chat model factory
-│   │       │   └── agent/      # LangGraph RAG graph
-│   │       └── routes/         # /api/documents, /api/chat
-│   └── frontend/
-│       ├── app/                # page.tsx (upload + chat UI)
-│       └── lib/api.ts           # typed fetch client
+│   ├── backend/                 # Express + TypeScript API + RAG + agents
+│   │   ├── src/
+│   │   │   ├── config/
+│   │   │   ├── db/
+│   │   │   ├── modules/
+│   │   │   ├── routes/
+│   │   │   ├── security/
+│   │   │   ├── types/
+│   │   │   ├── app.ts
+│   │   │   └── server.ts
+│   │   └── package.json
+│   ├── frontend/                # Next.js dashboard and chat UI
+│   │   ├── app/
+│   │   ├── components/
+│   │   └── lib/
+│   ├── mcp-gmail-calendar/      # Gmail + Calendar MCP server
+│   ├── mcp-linkedin/            # LinkedIn MCP server
+│   ├── mcp-github/              # GitHub MCP server
+│   ├── mcp-web-search/          # Web search MCP server
+│   ├── mcp-filesystem/          # Filesystem MCP server
+│   └── desktop/                 # Electron desktop app
+└──
 ```
 
-## Setup
+## Tech stack
 
-**1. Start Postgres (with pgvector):**
+- Backend: Node.js, Express, TypeScript
+- Frontend: Next.js, React, MUI
+- Database: PostgreSQL + pgvector
+- AI orchestration: LangGraph
+- LLM: Google Gemini
+- Embeddings: Xenova/Transformers.js
+- OAuth: Google and LinkedIn
+- Desktop: Electron + Vite
+- MCP: Model Context Protocol servers for external tools
+
+## Environment setup
+
+### 1. Start PostgreSQL
 ```bash
 docker compose up -d
 ```
 
-**2. Backend:**
+### 2. Backend setup
 ```bash
 cd apps/backend
 cp .env.example .env
-# add your free Gemini key from https://aistudio.google.com/apikey to .env
 npm install
-npm run migrate     # creates tables + HNSW index
-npm run dev          # http://localhost:4000
+npm run migrate
+npm run dev
 ```
 
-**3. Frontend (new terminal):**
+The backend listens on:
+- http://localhost:4000
+
+### 3. Frontend setup
 ```bash
 cd apps/frontend
-cp .env.local.example .env.local
 npm install
-npm run dev          # http://localhost:3000
+npm run dev
 ```
 
-Open http://localhost:3000, upload your CV, then ask it questions about yourself.
+The frontend runs on:
+- http://localhost:3000
 
-## How a question flows through the system
+### 4. Desktop app setup
+```bash
+cd apps/desktop
+npm install
+npm run dev
+```
 
-1. `POST /api/documents/upload` → text extracted → chunked (800 chars, 120 overlap)
-   → each chunk embedded locally via Xenova → stored in `document_chunks` with
-   its `vector(384)` embedding.
-2. `POST /api/chat { question }` → LangGraph runs:
-   `retrieve` node embeds the question, does a cosine-similarity HNSW search in
-   Postgres → `generate` node passes the top-k chunks as context to Gemini →
-   returns an answer with the source chunks it used.
+## Required environment variables
 
-## What's next (not built yet, by design)
+The backend expects a populated `.env` file based on `apps/backend/.env.example`. At minimum, configure:
 
-- **Gmail + Calendar**: new `modules/gmail`, `modules/calendar`, wired as new
-  LangGraph nodes (`readInbox`, `draftReply`, `scheduleEvent`), reusing the same
-  RAG store for context about you.
-- **GitHub/Bitbucket PR review**: official GitHub MCP server as a tool the
-  agent can call; results and comments also get embedded for future recall.
-- **LinkedIn posting**: we'll design this once we get there — flagged earlier
-  that unofficial LinkedIn automation carries ToS/account-risk considerations,
-  so it needs its own discussion before writing code.
-- **Coding agent**: a dedicated LangGraph subgraph (read → propose diff →
-  apply), fed by the same RAG memory.
+- `DATABASE_URL`
+- `GOOGLE_API_KEY`
+- `JWT_SECRET`
+- `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`
+- `LINKEDIN_OAUTH_CLIENT_ID` and `LINKEDIN_OAUTH_CLIENT_SECRET`
+- `GOOGLE_TOKEN_ENCRYPTION_KEY`
+- `LINKEDIN_TOKEN_ENCRYPTION_KEY`
+- `GITHUB_TOKEN_ENCRYPTION_KEY`
+- MCP server command arguments for Gmail/Calendar, LinkedIn, GitHub, and web search
 
-Each addition should slot into the existing `modules/` pattern and the same
-Postgres store — that's the reason for the structure chosen here.
+## Main backend routes
+
+Key API groups include:
+
+- `/api/auth` — login, signup, current-user lookup
+- `/api/documents` — upload and ingest files
+- `/api/chat` — chat and streaming chat endpoints
+- `/api/search` — search all indexed user knowledge
+- `/api/google` — Google OAuth flow
+- `/api/gmail` — Gmail read/send/sync tools
+- `/api/calendar` — calendar read/create/delete/sync
+- `/api/linkedin` — LinkedIn OAuth and post actions
+- `/api/github` — GitHub auth and sync endpoints
+- `/api/actions` — pending action review flow
+- `/api/automations` — scheduled task creation and execution
+- `/api/agents` — live specialist roster
+- `/api/sessions` — chat session management
+
+## Working features in this repo
+
+The repo already includes the following implemented capabilities:
+
+- CV and document ingestion with local embeddings
+- Authenticated chat system with streaming output
+- Multi-agent supervisor + specialist team
+- Google OAuth / Calendar / Gmail integration
+- LinkedIn OAuth + post drafting
+- GitHub connectivity + PR/issue review tooling
+- Unified search across all indexed sources
+- Scheduled automation engine
+- Pending human approval before external writes
+- Desktop workspace-based coding agent integration
+- Voice input/output for the frontend
+
+## Notes
+
+This monorepo is designed around a shared user memory layer and MCP-based tool integration. The assistant can expand by adding more MCP servers and specialist agents without reworking the core architecture.
+
+## Recommended next steps
+
+1. Copy the backend environment example and fill in your real credentials.
+2. Start Postgres and run the backend migration.
+3. Log in through the frontend and upload a CV or document.
+4. Connect Google, LinkedIn, and GitHub integrations from the integrations page.
+5. Try the chat, search, agents, and automation flows.
+
+## License
+
+This project is currently set up as a local monorepo for personal productivity and AI assistant workflows. Update licensing if you plan to distribute or commercialize it.

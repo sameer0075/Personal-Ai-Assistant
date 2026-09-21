@@ -26,8 +26,8 @@ export interface BulkSendResult {
   error?: string;
 }
 
-async function getGmailClient(userId: string): Promise<gmail_v1.Gmail> {
-  const auth = await getGoogleAuthClient(userId);
+async function getGmailClient(userId: string, workspaceId: string): Promise<gmail_v1.Gmail> {
+  const auth = await getGoogleAuthClient(userId, workspaceId);
   return google.gmail({ version: "v1", auth });
 }
 
@@ -60,9 +60,10 @@ function extractPlainTextBody(payload: gmail_v1.Schema$MessagePart | undefined):
 
 export async function listMessages(
   userId: string,
+  workspaceId: string,
   params: { query?: string; maxResults?: number }
 ): Promise<GmailMessageSummary[]> {
-  const gmail = await getGmailClient(userId);
+  const gmail = await getGmailClient(userId, workspaceId);
 
   const { data } = await gmail.users.messages.list({
     userId: "me",
@@ -95,8 +96,8 @@ export async function listMessages(
   return summaries;
 }
 
-export async function getMessage(userId: string, messageId: string): Promise<GmailMessageFull> {
-  const gmail = await getGmailClient(userId);
+export async function getMessage(userId: string, workspaceId: string, messageId: string): Promise<GmailMessageFull> {
+  const gmail = await getGmailClient(userId, workspaceId);
 
   const { data } = await gmail.users.messages.get({ userId: "me", id: messageId, format: "full" });
 
@@ -113,6 +114,7 @@ export async function getMessage(userId: string, messageId: string): Promise<Gma
 
 export async function sendMessage(
   userId: string,
+  workspaceId: string,
   params: {
     to: string;
     subject: string;
@@ -121,7 +123,7 @@ export async function sendMessage(
     attachment?: { filename: string; mimeType: string; base64Data: string };
   }
 ): Promise<{ id: string; threadId: string }> {
-  const gmail = await getGmailClient(userId);
+  const gmail = await getGmailClient(userId, workspaceId);
   const raw = buildRawEmail(params);
 
   const { data } = await gmail.users.messages.send({ userId: "me", requestBody: { raw } });
@@ -131,6 +133,7 @@ export async function sendMessage(
 
 export async function sendBulkMessages(
   userId: string,
+  workspaceId: string,
   params: {
     recipients: string[];
     subject: string;
@@ -144,7 +147,7 @@ export async function sendBulkMessages(
 
   for (const to of recipients) {
     try {
-      const result = await sendMessage(userId, { to, subject, body, attachment });
+      const result = await sendMessage(userId, workspaceId, { to, subject, body, attachment });
       results.push({ to, sent: true, ...result });
     } catch (err) {
       results.push({ to, sent: false, error: err instanceof Error ? err.message : "Unknown error" });

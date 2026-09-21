@@ -55,6 +55,7 @@ import ModeSwitch, { type AssistantMode } from "@/components/voice/ModeSwitch";
 import VoiceComposer from "@/components/voice/VoiceComposer";
 import { useSpeechToText } from "@/lib/useSpeechToText";
 import { speak, stopSpeaking, isSpeaking } from "@/lib/speech";
+import { useWorkspace } from "@/lib/workspaces/WorkspaceProvider";
 
 interface Message {
   id?: string; // present once persisted - required to edit a message
@@ -91,6 +92,7 @@ export default function Home() {
 }
 
 function HomeContent() {
+  const { activeWorkspace } = useWorkspace();
   const [messages, setMessages] = useState<Message[]>([]);
   const [question, setQuestion] = useState("");
   const [isAsking, setIsAsking] = useState(false);
@@ -156,7 +158,9 @@ function HomeContent() {
 
   useEffect(() => {
     refreshSessions();
-  }, [refreshSessions]);
+    setMessages([]);
+    setActiveSessionId(null);
+  }, [refreshSessions, activeWorkspace?.id]);
 
     function appendAssistantTokenAndUpdateTool(update: (m: Message) => Message) {
     setMessages((prev) => {
