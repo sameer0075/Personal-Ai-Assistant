@@ -1,8 +1,14 @@
+import { setDefaultResultOrder } from "node:dns";
 import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { assertDatabaseConnection } from "./config/database.js";
 import { embeddingService } from "./modules/embeddings/embedding.service.js";
 import { startAutomationWorker } from "./modules/automations/automations.service.js";
+
+// Prefer IPv4 for outbound HTTP. Pollinations (and some other hosts) resolve
+// to IPv6 first, and the IPv6 connect can exceed undici's 10s connect timeout,
+// which surfaced as the image tool "failing" even though the API was fine.
+setDefaultResultOrder("ipv4first");
 
 async function main() {
   // Run in parallel with the DB check - the embedding model load (first-run

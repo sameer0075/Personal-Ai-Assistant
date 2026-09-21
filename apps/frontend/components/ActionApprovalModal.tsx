@@ -14,7 +14,10 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Chip from "@mui/material/Chip";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Checkbox from "@mui/material/Checkbox";
+import Box from "@mui/material/Box";
 import { tokens } from "@/lib/theme";
+import { API_BASE_URL } from "@/lib/api/client";
+import { getToken } from "@/lib/auth/token";
 import {
   approveAction,
   rejectAction,
@@ -87,6 +90,34 @@ export default function ActionApprovalModal({ action, open, onClose, onDecided }
   const [issueNumber, setIssueNumber] = useState("");
   const [isSubmitting, setIsSubmitting] = useState<"approve" | "reject" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    setImageUrl(null);
+    if (!action || action.type !== "linkedin_post") return;
+    const imageRef = (action.payload as LinkedinActionPayload).imageRef;
+    if (!imageRef) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/images/${imageRef}`, {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        if (!res.ok) throw new Error("Failed to load the generated image");
+        const blob = await res.blob();
+        if (!cancelled) setImageUrl(URL.createObjectURL(blob));
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load the generated image");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      setImageUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+    };
+  }, [action]);
 
   useEffect(() => {
     if (!action) return;
@@ -250,17 +281,34 @@ export default function ActionApprovalModal({ action, open, onClose, onDecided }
               />
             </>
           ) : isLinkedin ? (
-            <TextField
-              label="Post text"
-              size="small"
-              required
-              multiline
-              minRows={6}
-              value={commentary}
-              onChange={(e) => e.target.value.length <= 3000 && setCommentary(e.target.value)}
-              helperText={`${commentary.length}/3000 - this will be visible to your LinkedIn network`}
-              sx={fieldSx}
-            />
+            <>
+              {imageUrl && (
+                <Box
+                  component="img"
+                  src={imageUrl}
+                  alt="AI-generated image to attach to the post"
+                  sx={{
+                    width: "100%",
+                    maxHeight: 320,
+                    objectFit: "cover",
+                    borderRadius: 2,
+                    border: `1px solid ${tokens.border}`,
+                    bgcolor: tokens.panelRaised,
+                  }}
+                />
+              )}
+              <TextField
+                label="Post text"
+                size="small"
+                required
+                multiline
+                minRows={6}
+                value={commentary}
+                onChange={(e) => e.target.value.length <= 3000 && setCommentary(e.target.value)}
+                helperText={`${commentary.length}/3000 - this will be visible to your LinkedIn network`}
+                sx={fieldSx}
+              />
+            </>
           ) : (
             <>
               <TextField

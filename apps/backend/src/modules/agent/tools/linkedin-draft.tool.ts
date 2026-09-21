@@ -4,13 +4,13 @@ import type { RunnableConfig } from "@langchain/core/runnables";
 import { createLinkedinDraft } from "../../actions/pending-actions.service.js";
 
 export const linkedinDraftPostTool = tool(
-  async ({ commentary }: { commentary: string }, config?: RunnableConfig) => {
+  async ({ commentary, imageRef }: { commentary: string; imageRef?: string }, config?: RunnableConfig) => {
     const userId: any = config?.configurable?.userId as string | undefined;
     if (!userId) {
       throw new Error("linkedin_draft_post called without a userId in context - this is a bug, not a user-facing error.");
     }
 
-    const action = await createLinkedinDraft(userId, { commentary });
+    const action = await createLinkedinDraft(userId, { commentary, imageRef });
     return JSON.stringify({
       drafted: true,
       pendingActionId: action.id,
@@ -28,6 +28,10 @@ export const linkedinDraftPostTool = tool(
       "post; never claim a post was published.",
     schema: z.object({
       commentary: z.string().min(1).max(3000).describe("The LinkedIn post text"),
+      imageRef: z
+        .string()
+        .optional()
+        .describe("Optional - the imageRef returned by generate_image, to attach the image to this post"),
     }),
   }
 );

@@ -13,6 +13,8 @@ export interface EmailActionPayload {
 
 export interface LinkedinActionPayload {
   commentary: string;
+  /** imageRef from the generate_image tool - the approval modal shows this image before publishing. */
+  imageRef?: string;
 }
 
 export interface GithubIssueActionPayload {

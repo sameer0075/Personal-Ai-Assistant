@@ -1,0 +1,18 @@
+.git
+.idea
+.DS_Store
+*.log
+
+# never ship secrets or node_modules into a build context
+**/node_modules
+**/.env
+**/.env.*
+!**/.env.local.example
+!**/.env.example
+
+# local build artifacts
+**/dist
+**/build
+**/.next
+**/out
+apps/desktop/out
