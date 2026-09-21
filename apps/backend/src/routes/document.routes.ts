@@ -32,6 +32,7 @@ documentRoutes.post("/upload", upload.single("file"), async (req, res) => {
 
     const result = await ingestFile({
       userId: req.userId!,
+      workspaceId: req.workspaceId!,
       buffer: req.file.buffer,
       filename: req.file.originalname,
       sourceType,

@@ -49,7 +49,7 @@ export interface ChunkSearchRow {
 }
 
 /** Direct chat message rows (keyword match on message content). */
-async function searchChatMessages(userId: string, query: string, limit: number): Promise<ChatMessageSearchRow[]> {
+async function searchChatMessages(userId: string, workspaceId: string, query: string, limit: number): Promise<ChatMessageSearchRow[]> {
   const { rows } = await pool.query<ChatMessageSearchRow>(
     `SELECT m.id,
             m.content,
@@ -59,17 +59,17 @@ async function searchChatMessages(userId: string, query: string, limit: number):
             s.title      AS "sessionTitle"
      FROM chat_messages m
      JOIN chat_sessions s ON s.id = m.session_id
-     WHERE s.user_id = $1
-       AND m.content ILIKE $2 ESCAPE '\\'
+     WHERE s.user_id = $1 AND s.workspace_id = $2
+       AND m.content ILIKE $3 ESCAPE '\\'
      ORDER BY m.created_at DESC
      LIMIT $3`,
-    [userId, toLikePattern(query), limit]
+    [userId, workspaceId, toLikePattern(query), limit]
   );
   return rows;
 }
 
 /** Document rows whose title matches (covers knowledge base + synced sources). */
-async function searchDocumentsByTitle(userId: string, query: string, limit: number): Promise<DocumentTitleSearchRow[]> {
+async function searchDocumentsByTitle(userId: string, workspaceId: string, query: string, limit: number): Promise<DocumentTitleSearchRow[]> {
   const { rows } = await pool.query<DocumentTitleSearchRow>(
     `SELECT id,
             title,
@@ -77,28 +77,28 @@ async function searchDocumentsByTitle(userId: string, query: string, limit: numb
             metadata,
             created_at AS "createdAt"
      FROM documents
-     WHERE user_id = $1
-       AND title ILIKE $2 ESCAPE '\\'
+     WHERE user_id = $1 AND workspace_id = $2
+       AND title ILIKE $3 ESCAPE '\\'
      ORDER BY created_at DESC
      LIMIT $3`,
-    [userId, toLikePattern(query), limit]
+    [userId, workspaceId, toLikePattern(query), limit]
   );
   return rows;
 }
 
 /** Locally-tracked LinkedIn posts (keyword match on the post commentary). */
-async function searchLinkedinPosts(userId: string, query: string, limit: number): Promise<LinkedinPostSearchRow[]> {
+async function searchLinkedinPosts(userId: string, workspaceId: string, query: string, limit: number): Promise<LinkedinPostSearchRow[]> {
   const { rows } = await pool.query<LinkedinPostSearchRow>(
     `SELECT id,
             commentary,
             published_at AS "publishedAt"
      FROM linkedin_posts
-     WHERE user_id = $1
+     WHERE user_id = $1 AND workspace_id = $2
        AND deleted_at IS NULL
-       AND commentary ILIKE $2 ESCAPE '\\'
+       AND commentary ILIKE $3 ESCAPE '\\'
      ORDER BY published_at DESC
      LIMIT $3`,
-    [userId, toLikePattern(query), limit]
+    [userId, workspaceId, toLikePattern(query), limit]
   );
   return rows;
 }
@@ -109,7 +109,7 @@ async function searchLinkedinPosts(userId: string, query: string, limit: number)
  * not stored row-by-row (Gmail/Calendar are only embedded, never copied into
  * their own table; their searchable surface is these chunks).
  */
-async function searchChunksByKeyword(userId: string, query: string, limit: number): Promise<ChunkSearchRow[]> {
+async function searchChunksByKeyword(userId: string, workspaceId: string, query: string, limit: number): Promise<ChunkSearchRow[]> {
   const { rows } = await pool.query<ChunkSearchRow>(
     `SELECT c.id          AS "chunkId",
             c.document_id AS "documentId",
@@ -120,11 +120,11 @@ async function searchChunksByKeyword(userId: string, query: string, limit: numbe
             c.created_at  AS "createdAt"
      FROM document_chunks c
      JOIN documents d ON d.id = c.document_id
-     WHERE d.user_id = $1
-       AND c.content ILIKE $2 ESCAPE '\\'
+     WHERE d.user_id = $1 AND d.workspace_id = $2
+       AND c.content ILIKE $3 ESCAPE '\\'
      ORDER BY c.created_at DESC
      LIMIT $3`,
-    [userId, toLikePattern(query), limit]
+    [userId, workspaceId, toLikePattern(query), limit]
   );
   return rows;
 }
@@ -134,7 +134,7 @@ async function searchChunksByKeyword(userId: string, query: string, limit: numbe
  * and source_type come back in the same row (keeps one hit-shape for both
  * keyword and semantic paths).
  */
-async function searchSimilarChunks(userId: string, queryEmbedding: number[], topK: number): Promise<ChunkSearchRow[]> {
+async function searchSimilarChunks(userId: string, workspaceId: string, queryEmbedding: number[], topK: number): Promise<ChunkSearchRow[]> {
   const { rows } = await pool.query<ChunkSearchRow>(
     `SELECT c.id          AS "chunkId",
             c.document_id AS "documentId",
@@ -146,10 +146,10 @@ async function searchSimilarChunks(userId: string, queryEmbedding: number[], top
             1 - (c.embedding <=> $1) AS similarity
      FROM document_chunks c
      JOIN documents d ON d.id = c.document_id
-     WHERE d.user_id = $2
+    WHERE d.user_id = $2 AND d.workspace_id = $3
      ORDER BY c.embedding <=> $1
      LIMIT $3`,
-    [`[${queryEmbedding.join(",")}]`, userId, topK]
+    [`[${queryEmbedding.join(",")}]`, userId, workspaceId, topK]
   );
 
   return rows.map((row) => ({ ...row, content: row.content.slice(0, 2000) }));

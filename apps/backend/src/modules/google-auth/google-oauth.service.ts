@@ -23,13 +23,13 @@ function createOAuthClient(): OAuth2Client {
   });
 }
 
-export function buildGoogleConsentUrl(userId: string): string {
+export function buildGoogleConsentUrl(userId: string, workspaceId: string): string {
   const client = createOAuthClient();
   return client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
     scope: GOOGLE_SCOPES,
-    state: signOAuthState(userId, OAUTH_STATE_PURPOSE),
+    state: signOAuthState(userId, workspaceId, OAUTH_STATE_PURPOSE),
   });
 }
 
@@ -48,7 +48,7 @@ export function buildGoogleConsentUrl(userId: string): string {
  * themselves were already successfully issued.
  */
 export async function handleGoogleOAuthCallback(code: string, state: string | undefined): Promise<{ email: string | null }> {
-  const userId = verifyOAuthState(state, OAUTH_STATE_PURPOSE);
+  const { userId, workspaceId } = verifyOAuthState(state, OAUTH_STATE_PURPOSE);
 
   const client = createOAuthClient();
   const { tokens } = await client.getToken(code);
@@ -70,7 +70,7 @@ export async function handleGoogleOAuthCallback(code: string, state: string | un
   }
 
   const grantedScopes = typeof tokens.scope === "string" ? tokens.scope.split(" ") : GOOGLE_SCOPES;
-  await googleCredentialsRepository.upsert(userId, tokens.refresh_token, email, grantedScopes);
+  await googleCredentialsRepository.upsert(userId, workspaceId, tokens.refresh_token, email, grantedScopes);
 
   return { email };
 }

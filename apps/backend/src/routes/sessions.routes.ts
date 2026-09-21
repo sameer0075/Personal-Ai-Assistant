@@ -8,12 +8,12 @@ export const sessionsRoutes = Router();
 sessionsRoutes.use(requireAuth);
 
 sessionsRoutes.get("/", async (req, res) => {
-  res.json(await listSessions(req.userId!));
+  res.json(await listSessions(req.userId!, req.workspaceId!));
 });
 
 sessionsRoutes.get("/:id/messages", async (req, res) => {
   try {
-    const messages = await getAllMessages(req.params.id, req.userId!);
+    const messages = await getAllMessages(req.params.id, req.userId!, req.workspaceId!);
 
     const withPendingActions = await Promise.all(
       messages.map(async (m) => {
@@ -41,7 +41,7 @@ sessionsRoutes.get("/:id/messages", async (req, res) => {
 
 sessionsRoutes.delete("/:id", async (req, res) => {
   try {
-    await deleteSession(req.params.id, req.userId!);
+    await deleteSession(req.params.id, req.userId!, req.workspaceId!);
     res.json({ deleted: true });
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to delete session" });

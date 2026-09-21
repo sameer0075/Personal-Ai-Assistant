@@ -60,7 +60,7 @@ const updateAutomationSchema = z
 /** GET /api/automations — the user's scheduled tasks, soonest trigger first. */
 automationsRoutes.get("/", async (req, res) => {
   try {
-    res.json(await listAutomations(req.userId!));
+    res.json(await listAutomations(req.userId!, req.workspaceId!));
   } catch (err) {
     console.error("[automations] list failed:", err);
     res.status(500).json({ error: "Failed to load automations" });
@@ -75,7 +75,7 @@ automationsRoutes.post("/", async (req, res) => {
       res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid automation" });
       return;
     }
-    const created = await createAutomation(req.userId!, parsed.data);
+    const created = await createAutomation(req.userId!, req.workspaceId!, parsed.data);
     res.status(201).json(created);
   } catch (err) {
     console.error("[automations] create failed:", err);
@@ -92,7 +92,7 @@ automationsRoutes.post("/:id/run", async (req, res) => {
       res.status(400).json({ error: "Missing automation id" });
       return;
     }
-    res.json(await runAutomationNow(req.userId!, id));
+    res.json(await runAutomationNow(req.userId!, req.workspaceId!, id));
   } catch (err) {
     console.error(`[automations] run-now failed (${req.params.id}):`, err);
     const message = err instanceof Error ? err.message : "Failed to run automation";
@@ -108,7 +108,7 @@ automationsRoutes.patch("/:id", async (req, res) => {
       res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid update" });
       return;
     }
-    res.json(await updateAutomation(req.userId!, req.params.id, parsed.data));
+    res.json(await updateAutomation(req.userId!, req.workspaceId!, req.params.id, parsed.data));
   } catch (err) {
     console.error(`[automations] update failed (${req.params.id}):`, err);
     const message = err instanceof Error ? err.message : "Failed to update automation";
@@ -119,7 +119,7 @@ automationsRoutes.patch("/:id", async (req, res) => {
 /** DELETE /api/automations/:id */
 automationsRoutes.delete("/:id", async (req, res) => {
   try {
-    await deleteAutomation(req.userId!, req.params.id);
+    await deleteAutomation(req.userId!, req.workspaceId!, req.params.id);
     res.status(204).end();
   } catch (err) {
     console.error(`[automations] delete failed (${req.params.id}):`, err);

@@ -40,6 +40,7 @@ function sendEvent(res: Response, event: string, payload: unknown): void {
 async function streamTurn(
   res: Response,
   userId: string,
+  workspaceId: string,
   sessionId: string,
   question: string,
   attachments?: ChatAttachment[]
@@ -56,9 +57,9 @@ async function streamTurn(
   sendEvent(res, "session", { sessionId });
 
   try {
-    const history = await getHistoryForAgent(sessionId);
+    const history = await getHistoryForAgent(sessionId, workspaceId);
 
-    for await (const event of streamAssistantAgent(userId, question, history, attachments)) {
+    for await (const event of streamAssistantAgent(userId, workspaceId, question, history, attachments)) {
       if (event.type === "token") {
         sendEvent(res, "token", { content: event.content });
       } else if (event.type === "tool_start") {
@@ -69,7 +70,7 @@ async function streamTurn(
         sendEvent(res, "error", { message: event.message });
       } else if (event.type === "done") {
         const { userMessageId, assistantMessageId } = await recordTurn(sessionId, question, event.data, attachments);
-        indexTurnForRecall(userId, sessionId, question, event.data.answer);
+        indexTurnForRecall(userId, workspaceId, sessionId, question, event.data.answer);
         sendEvent(res, "complete", { sessionId, userMessageId, assistantMessageId, ...event.data });
       }
     }
@@ -85,15 +86,15 @@ async function streamTurn(
 chatRoutes.post("/", attachmentUpload.single("file"), async (req, res) => {
   try {
     const { question, sessionId: requestedSessionId } = chatRequestSchema.parse(req.body);
-    const session = await getOrCreateSession(req.userId!, requestedSessionId);
+    const session = await getOrCreateSession(req.userId!, req.workspaceId!, requestedSessionId);
 
     const attachments = req.file ? [await buildAttachment(req.file)] : undefined;
 
-    const history = await getHistoryForAgent(session.id);
-    const result = await runAssistantAgent(req.userId!, question, history, attachments);
+    const history = await getHistoryForAgent(session.id, req.workspaceId!);
+    const result = await runAssistantAgent(req.userId!, req.workspaceId!, question, history, attachments);
 
     const { userMessageId, assistantMessageId } = await recordTurn(session.id, question, result, attachments);
-    indexTurnForRecall(req.userId!, session.id, question, result.answer);
+    indexTurnForRecall(req.userId!, req.workspaceId!, session.id, question, result.answer);
 
     res.json({ sessionId: session.id, userMessageId, assistantMessageId, ...result });
   } catch (err) {
@@ -123,13 +124,13 @@ chatRoutes.post("/stream", attachmentUpload.single("file"), async (req, res) => 
 
   let session;
   try {
-    session = await getOrCreateSession(req.userId!, parsed.sessionId);
+    session = await getOrCreateSession(req.userId!, req.workspaceId!, parsed.sessionId);
   } catch (err) {
     res.status(404).json({ error: err instanceof Error ? err.message : "Unknown error" });
     return;
   }
 
-  await streamTurn(res, req.userId!, session.id, parsed.question, attachments);
+  await streamTurn(res, req.userId!, req.workspaceId!, session.id, parsed.question, attachments);
 });
 
 const editRequestSchema = z.object({
@@ -141,13 +142,13 @@ const editRequestSchema = z.object({
 chatRoutes.post("/edit", async (req, res) => {
   try {
     const { sessionId, messageId, question } = editRequestSchema.parse(req.body);
-    await editUserMessage(sessionId, req.userId!, messageId);
+    await editUserMessage(sessionId, req.userId!, req.workspaceId!, messageId);
 
-    const history = await getHistoryForAgent(sessionId);
-    const result = await runAssistantAgent(req.userId!, question, history);
+    const history = await getHistoryForAgent(sessionId, req.workspaceId!);
+    const result = await runAssistantAgent(req.userId!, req.workspaceId!, question, history);
 
     const { userMessageId, assistantMessageId } = await recordTurn(sessionId, question, result);
-    indexTurnForRecall(req.userId!, sessionId, question, result.answer);
+    indexTurnForRecall(req.userId!, req.workspaceId!, sessionId, question, result.answer);
 
     res.json({ sessionId, userMessageId, assistantMessageId, ...result });
   } catch (err) {
@@ -165,11 +166,11 @@ chatRoutes.post("/edit/stream", async (req, res) => {
   }
 
   try {
-    await editUserMessage(parsed.sessionId, req.userId!, parsed.messageId);
+    await editUserMessage(parsed.sessionId, req.userId!, req.workspaceId!, parsed.messageId);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Unknown error" });
     return;
   }
 
-  await streamTurn(res, req.userId!, parsed.sessionId, parsed.question);
+  await streamTurn(res, req.userId!, req.workspaceId!, parsed.sessionId, parsed.question);
 });

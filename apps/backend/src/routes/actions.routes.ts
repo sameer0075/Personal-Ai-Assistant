@@ -15,7 +15,7 @@ export const actionsRoutes = Router();
 actionsRoutes.use(requireAuth);
 
 actionsRoutes.get("/pending", async (req, res) => {
-  res.json(await listPendingActions(req.userId!));
+  res.json(await listPendingActions(req.userId!, req.workspaceId!));
 });
 
 const emailDraftSchema = z.object({
@@ -29,7 +29,7 @@ const emailDraftSchema = z.object({
 actionsRoutes.post("/email/draft", async (req, res) => {
   try {
     const payload = emailDraftSchema.parse(req.body);
-    const action = await createEmailDraft(req.userId!, payload, "user");
+    const action = await createEmailDraft(req.userId!, req.workspaceId!, payload, "user");
     res.status(201).json(action);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to draft email" });
@@ -41,7 +41,7 @@ const linkedinDraftSchema = z.object({ commentary: z.string().trim().min(1).max(
 actionsRoutes.post("/linkedin/draft", async (req, res) => {
   try {
     const payload = linkedinDraftSchema.parse(req.body);
-    const action = await createLinkedinDraft(req.userId!, payload, "user");
+    const action = await createLinkedinDraft(req.userId!, req.workspaceId!, payload, "user");
     res.status(201).json(action);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to draft post" });
@@ -57,7 +57,7 @@ const githubIssueDraftSchema = z.object({
 actionsRoutes.post("/github/issue/draft", async (req, res) => {
   try {
     const payload = githubIssueDraftSchema.parse(req.body);
-    const action = await createGithubIssueDraft(req.userId!, payload, "user");
+    const action = await createGithubIssueDraft(req.userId!, req.workspaceId!, payload, "user");
     res.status(201).json(action);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to draft GitHub issue" });
@@ -73,7 +73,7 @@ const githubCommentDraftSchema = z.object({
 actionsRoutes.post("/github/comment/draft", async (req, res) => {
   try {
     const payload = githubCommentDraftSchema.parse(req.body);
-    const action = await createGithubCommentDraft(req.userId!, payload, "user");
+    const action = await createGithubCommentDraft(req.userId!, req.workspaceId!, payload, "user");
     res.status(201).json(action);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to draft GitHub comment" });

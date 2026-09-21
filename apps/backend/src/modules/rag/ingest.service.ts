@@ -18,25 +18,28 @@ function mimeTypeFor(filename: string): string {
 
 export async function ingestFile(params: {
   userId: string;
+  workspaceId: string;
   buffer: Buffer;
   filename: string;
   sourceType: SourceType;
+  metadata?: Record<string, unknown>;
   replaceExisting?: boolean;
 }): Promise<IngestResult> {
-  const { userId, buffer, filename, sourceType, replaceExisting = false } = params;
+  const { userId, workspaceId, buffer, filename, sourceType, metadata = {}, replaceExisting = false } = params;
 
   if (replaceExisting) {
-    await documentRepository.deleteDocumentsBySourceType(userId, sourceType);
+    await documentRepository.deleteDocumentsBySourceType(userId, workspaceId, sourceType);
   }
 
   const rawText = await extractTextFromFile(buffer, filename);
 
   return ingestText({
     userId,
+    workspaceId,
     text: rawText,
     title: filename,
     sourceType,
-    metadata: { originalFilename: filename },
+    metadata: { originalFilename: filename, ...metadata },
     file: { data: buffer, mimeType: mimeTypeFor(filename) }
   });
 }

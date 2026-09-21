@@ -31,7 +31,11 @@ export async function loadMcpToolsByName(): Promise<Record<string, StructuredToo
     out[mcpTool.name] = tool(
       async (input: unknown, config?: RunnableConfig) => {
         const userId = config?.configurable?.userId as string | undefined;
-        const args = { ...((input as Record<string, unknown> | undefined) ?? {}), userId };
+        const workspaceId = config?.configurable?.workspaceId as string | undefined;
+        const args: Record<string, unknown> = { ...((input as Record<string, unknown> | undefined) ?? {}), userId, workspaceId };
+        // Emailing attendees is outbound mail, which must go through human approval
+        // (hr_event_invite) - agents may create events but never trigger invites.
+        delete args.sendUpdates;
         return callMcpTool(mcpTool.name, args);
       },
       {

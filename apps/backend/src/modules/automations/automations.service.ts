@@ -81,8 +81,8 @@ function materializeSchedule(
  * connected - but the destination defaults to the *logged-in account's* email,
  * never a hardcoded or shared address.
  */
-async function requireGoogleConnected(userId: string): Promise<void> {
-  const status = await googleCredentialsRepository.getStatus(userId);
+async function requireGoogleConnected(userId: string, workspaceId: string): Promise<void> {
+  const status = await googleCredentialsRepository.getStatus(userId, workspaceId);
   if (!status.connected) {
     throw new Error("Email delivery needs a connected Google account — connect it in Integrations first.");
   }
@@ -97,6 +97,7 @@ async function getAccountEmail(userId: string): Promise<string> {
 /** Defaults the email destination + subject, validates the mode, and sanity-checks Google connectivity. */
 async function materializeDelivery(
   userId: string,
+  workspaceId: string,
   title: string,
   delivery: CreateAutomationInput["delivery"]
 ): Promise<Pick<ScheduledTask, "deliveryMode" | "emailTo" | "emailSubject">> {
@@ -110,7 +111,7 @@ async function materializeDelivery(
 
   // email / both → connection is required to send, and the destination is the
   // logged-in user's own email unless they explicitly override it.
-  await requireGoogleConnected(userId);
+  await requireGoogleConnected(userId, workspaceId);
   if (!emailTo) {
     emailTo = await getAccountEmail(userId);
   }
@@ -120,11 +121,12 @@ async function materializeDelivery(
   return { deliveryMode: mode, emailTo, emailSubject };
 }
 
-export async function createAutomation(userId: string, input: CreateAutomationInput): Promise<ScheduledTask> {
+export async function createAutomation(userId: string, workspaceId: string, input: CreateAutomationInput): Promise<ScheduledTask> {
   const materialized = materializeSchedule(input.schedule);
-  const delivery = await materializeDelivery(userId, input.title, input.delivery);
+  const delivery = await materializeDelivery(userId, workspaceId, input.title, input.delivery);
   return automationsRepository.create({
     userId,
+    workspaceId,
     title: input.title.trim(),
     prompt: input.prompt.trim(),
     scheduleKind: input.schedule.kind,
@@ -134,19 +136,20 @@ export async function createAutomation(userId: string, input: CreateAutomationIn
   });
 }
 
-export function listAutomations(userId: string): Promise<ScheduledTask[]> {
-  return automationsRepository.list(userId);
+export function listAutomations(userId: string, workspaceId: string): Promise<ScheduledTask[]> {
+  return automationsRepository.list(userId, workspaceId);
 }
 
 export async function updateAutomation(
   userId: string,
+  workspaceId: string,
   id: string,
   input: UpdateAutomationInput
 ): Promise<ScheduledTask> {
-  const existing = await automationsRepository.get(id, userId);
+  const existing = await automationsRepository.get(id, userId, workspaceId);
   if (!existing) throw new Error("Automation not found");
 
-  const patch: Parameters<typeof automationsRepository.update>[2] = {};
+  const patch: Parameters<typeof automationsRepository.update>[3] = {};
   if (input.title !== undefined) patch.title = input.title.trim();
   if (input.prompt !== undefined) patch.prompt = input.prompt.trim();
   if (input.enabled !== undefined) patch.enabled = input.enabled;
@@ -163,7 +166,7 @@ export async function updateAutomation(
   }
 
   if (input.delivery !== undefined) {
-    const merged = await materializeDelivery(userId, existing.title, {
+    const merged = await materializeDelivery(userId, workspaceId, existing.title, {
       mode: input.delivery.mode ?? existing.deliveryMode,
       emailTo: input.delivery.emailTo ?? existing.emailTo ?? undefined,
       emailSubject: input.delivery.emailSubject ?? existing.emailSubject ?? undefined,
@@ -173,25 +176,25 @@ export async function updateAutomation(
     patch.emailSubject = merged.emailSubject;
   }
 
-  const updated = await automationsRepository.update(id, userId, patch);
+  const updated = await automationsRepository.update(id, userId, workspaceId, patch);
   if (!updated) throw new Error("Automation not found");
   return updated;
 }
 
-export async function deleteAutomation(userId: string, id: string): Promise<void> {
-  const removed = await automationsRepository.remove(id, userId);
+export async function deleteAutomation(userId: string, workspaceId: string, id: string): Promise<void> {
+  const removed = await automationsRepository.remove(id, userId, workspaceId);
   if (!removed) throw new Error("Automation not found");
 }
 
 /** Session an automation's answer lands in: its pinned one, else the most recent chat, else a new one. */
 async function resolveDeliverySession(task: ScheduledTask): Promise<ChatSession> {
   if (task.deliverToSessionId) {
-    const pinned = await chatSessionRepository.getSession(task.deliverToSessionId, task.userId);
+    const pinned = await chatSessionRepository.getSession(task.deliverToSessionId, task.userId, task.workspaceId);
     if (pinned) return pinned;
   }
-  const sessions = await listSessions(task.userId);
+  const sessions = await listSessions(task.userId, task.workspaceId);
   if (sessions[0]) return sessions[0];
-  return chatSessionRepository.createSession(task.userId, task.title);
+  return chatSessionRepository.createSession(task.userId, task.workspaceId, task.title);
 }
 
 /** Next trigger after a successful run, or null for a one-shot (which is then disabled). */
@@ -207,13 +210,13 @@ function computeNextTrigger(task: ScheduledTask, lastRunAt: Date): Date | null {
 
 async function runOne(task: ScheduledTask): Promise<void> {
   const started = Date.now();
-  const result = await runAssistantAgent(task.userId, task.prompt);
+  const result = await runAssistantAgent(task.userId, task.workspaceId, task.prompt);
 
   if (task.deliveryMode !== "chat") {
     const to = task.emailTo ?? (await getAccountEmail(task.userId));
     const subject = task.emailSubject ?? `[Automation: ${task.title}]`;
     const body = `Automation: ${task.title}\nRun at: ${new Date().toLocaleString()}\n\n${result.answer}`;
-    await callMcpTool("gmail_send_message", { to, subject, body, userId: task.userId });
+    await callMcpTool("gmail_send_message", { to, subject, body, userId: task.userId, workspaceId: task.workspaceId });
     console.log(`✉️ [automations] emailed "${task.title}" to ${to}`);
   }
 
@@ -228,6 +231,7 @@ async function runOne(task: ScheduledTask): Promise<void> {
     });
     ingestText({
       userId: task.userId,
+      workspaceId: task.workspaceId,
       title: `Automation: ${task.title}`,
       text: `Automation "${task.title}" ran:\n\n${result.answer}`,
       sourceType: "conversation",
@@ -259,8 +263,8 @@ export async function runDueAutomations(now: Date = new Date()): Promise<number>
 }
 
 /** Runs one automation immediately, outside the claim cycle (e.g. the "Run now" button). */
-export async function runAutomationNow(userId: string, id: string): Promise<{ answer: string }> {
-  const task = await automationsRepository.get(id, userId);
+export async function runAutomationNow(userId: string, workspaceId: string, id: string): Promise<{ answer: string }> {
+  const task = await automationsRepository.get(id, userId, workspaceId);
   if (!task) throw new Error("Automation not found");
   await runOne(task);
   return { answer: "Ran successfully — delivered to chat and/or email." };

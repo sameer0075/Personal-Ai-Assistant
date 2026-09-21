@@ -16,11 +16,12 @@ import { retrieveRelevantChunks } from "../../rag/retrieve.service.js";
 export const searchKnowledgeBaseTool = tool(
   async ({ query }: { query: string }, config?: RunnableConfig) => {
     const userId = config?.configurable?.userId as string | undefined;
-    if (!userId) {
+    const workspaceId = config?.configurable?.workspaceId as string | undefined;
+    if (!userId || !workspaceId) {
       throw new Error("search_knowledge_base called without a userId in context - this is a bug, not a user-facing error.");
     }
 
-    const chunks = await retrieveRelevantChunks(userId, query);
+    const chunks = await retrieveRelevantChunks(userId, workspaceId, query);
     if (!chunks.length) return "No relevant information found in the personal knowledge base.";
 
     return chunks

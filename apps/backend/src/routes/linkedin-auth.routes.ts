@@ -9,17 +9,17 @@ export const linkedinAuthRoutes = Router();
 
 /** GET /api/linkedin/auth-url - returns OAuth consent URL with signed userId state. */
 linkedinAuthRoutes.get("/auth-url", requireAuth, (req, res) => {
-  res.json({ url: buildLinkedinConsentUrl(req.userId!) });
+  res.json({ url: buildLinkedinConsentUrl(req.userId!, req.workspaceId!) });
 });
 
 /** GET /api/linkedin/status - has the current user connected a LinkedIn account? */
 linkedinAuthRoutes.get("/status", requireAuth, async (req, res) => {
-  res.json(await linkedinCredentialsRepository.getStatus(req.userId!));
+  res.json(await linkedinCredentialsRepository.getStatus(req.userId!, req.workspaceId!));
 });
 
 /** POST /api/linkedin/disconnect - revoke locally stored credentials for the current user. */
 linkedinAuthRoutes.post("/disconnect", requireAuth, async (req, res) => {
-  await linkedinCredentialsRepository.disconnect(req.userId!);
+  await linkedinCredentialsRepository.disconnect(req.userId!, req.workspaceId!);
   res.status(204).end();
 });
 

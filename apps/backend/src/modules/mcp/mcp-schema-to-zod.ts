@@ -84,9 +84,13 @@ function objectToZod(schema: JsonSchemaProperty): z.ZodObject<Record<string, z.Z
 
 export function mcpInputSchemaToZod(inputSchema: Record<string, unknown>): z.ZodObject<Record<string, z.ZodTypeAny>> {
   const schema = inputSchema as JsonSchemaProperty;
-  if (schema.properties && "userId" in schema.properties) {
-    const { userId: _omit, ...rest } = schema.properties;
-    return objectToZod({ ...schema, properties: rest, required: (schema.required ?? []).filter((k) => k !== "userId") });
+  if (schema.properties && ("userId" in schema.properties || "workspaceId" in schema.properties)) {
+    const { userId: _omitUser, workspaceId: _omitWorkspace, ...rest } = schema.properties;
+    return objectToZod({
+      ...schema,
+      properties: rest,
+      required: (schema.required ?? []).filter((k) => k !== "userId" && k !== "workspaceId"),
+    });
   }
   return objectToZod(schema);
 }

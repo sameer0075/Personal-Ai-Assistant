@@ -6,11 +6,11 @@ import { createLinkedinDraft } from "../../actions/pending-actions.service.js";
 export const linkedinDraftPostTool = tool(
   async ({ commentary, imageRef }: { commentary: string; imageRef?: string }, config?: RunnableConfig) => {
     const userId: any = config?.configurable?.userId as string | undefined;
-    if (!userId) {
+    if (!userId || !config?.configurable?.workspaceId) {
       throw new Error("linkedin_draft_post called without a userId in context - this is a bug, not a user-facing error.");
     }
 
-    const action = await createLinkedinDraft(userId, { commentary, imageRef });
+    const action = await createLinkedinDraft(userId, config?.configurable?.workspaceId as string, { commentary, imageRef });
     return JSON.stringify({
       drafted: true,
       pendingActionId: action.id,

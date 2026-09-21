@@ -16,50 +16,50 @@ export interface GithubConnectionStatus {
  */
 export const githubCredentialsRepository = {
   /** Encrypts and stores a PAT, keeping the placeholder login until it's validated. */
-  async storePlaintextToken(userId: string, token: string): Promise<void> {
+  async storePlaintextToken(userId: string, workspaceId: string, token: string): Promise<void> {
     const encrypted = encryptSecret(token, env.GITHUB_TOKEN_ENCRYPTION_KEY);
     await pool.query(
-      `INSERT INTO github_credentials (user_id, github_login, github_token_encrypted, updated_at)
-       VALUES ($1, '', $2, now())
-       ON CONFLICT (user_id)
+      `INSERT INTO github_credentials (user_id, workspace_id, github_login, github_token_encrypted, updated_at)
+       VALUES ($1, $2, '', $3, now())
+       ON CONFLICT (workspace_id)
        DO UPDATE SET github_token_encrypted = EXCLUDED.github_token_encrypted, updated_at = now()`,
-      [userId, encrypted]
+      [userId, workspaceId, encrypted]
     );
   },
 
-  async updateAccount(userId: string, login: string, email: string | null): Promise<void> {
+  async updateAccount(userId: string, workspaceId: string, login: string, email: string | null): Promise<void> {
     await pool.query(
-      `UPDATE github_credentials SET github_login = $2, github_email = $3, updated_at = now() WHERE user_id = $1`,
-      [userId, login, email]
+      `UPDATE github_credentials SET github_login = $3, github_email = $4, updated_at = now() WHERE user_id = $1 AND workspace_id = $2`,
+      [userId, workspaceId, login, email]
     );
   },
 
-  async getStatus(userId: string): Promise<GithubConnectionStatus> {
+  async getStatus(userId: string, workspaceId: string): Promise<GithubConnectionStatus> {
     const { rows } = await pool.query<{ github_login: string | null; github_email: string | null }>(
-      `SELECT github_login, github_email FROM github_credentials WHERE user_id = $1`,
-      [userId]
+      `SELECT github_login, github_email FROM github_credentials WHERE user_id = $1 AND workspace_id = $2`,
+      [userId, workspaceId]
     );
     if (!rows[0]?.github_login) return { connected: false, login: null, email: null };
     return { connected: true, login: rows[0].github_login, email: rows[0].github_email };
   },
 
-  async hasToken(userId: string): Promise<boolean> {
+  async hasToken(userId: string, workspaceId: string): Promise<boolean> {
     const { rows } = await pool.query<{ github_token_encrypted: string | null }>(
-      `SELECT github_token_encrypted FROM github_credentials WHERE user_id = $1`,
-      [userId]
+      `SELECT github_token_encrypted FROM github_credentials WHERE user_id = $1 AND workspace_id = $2`,
+      [userId, workspaceId]
     );
     return Boolean(rows[0]?.github_token_encrypted);
   },
 
-  async disconnect(userId: string): Promise<void> {
-    await pool.query(`DELETE FROM github_credentials WHERE user_id = $1`, [userId]);
+  async disconnect(userId: string, workspaceId: string): Promise<void> {
+    await pool.query(`DELETE FROM github_credentials WHERE user_id = $1 AND workspace_id = $2`, [userId, workspaceId]);
   },
 
   /** Decrypts a stored PAT - used by the connect flow to confirm the new token is live via the MCP server. */
-  async getDecryptedToken(userId: string): Promise<string | null> {
+  async getDecryptedToken(userId: string, workspaceId: string): Promise<string | null> {
     const { rows } = await pool.query<{ github_token_encrypted: string }>(
-      `SELECT github_token_encrypted FROM github_credentials WHERE user_id = $1`,
-      [userId]
+      `SELECT github_token_encrypted FROM github_credentials WHERE user_id = $1 AND workspace_id = $2`,
+      [userId, workspaceId]
     );
     if (!rows[0]) return null;
     return decryptSecret(rows[0].github_token_encrypted, env.GITHUB_TOKEN_ENCRYPTION_KEY);

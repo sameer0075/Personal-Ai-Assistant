@@ -108,6 +108,7 @@ function chunkForDisplay(text: string): string[] {
 
 export async function* streamAssistantAgent(
   userId: string,
+  workspaceId: string,
   question: string,
   history: Array<{ role: "user" | "assistant"; content: string }> = [],
   attachments?: ChatAttachment[]
@@ -155,7 +156,7 @@ export async function* streamAssistantAgent(
      * chunking the final (fully correct) answer - same fast "typing" feel,
      * correct tool-calling behavior underneath.
      */
-    const stream = await agent.stream({ messages: allMessages }, { configurable: { userId }, streamMode: "updates" });
+    const stream = await agent.stream({ messages: allMessages }, { configurable: { userId, workspaceId }, streamMode: "updates" });
 
     for await (const update of stream) {
       // `update` is like `{ agent: { messages: [...] } }` or
@@ -203,11 +204,12 @@ export async function* streamAssistantAgent(
 /** Non-streaming convenience wrapper - drains streamAssistantAgent and returns the final payload. */
 export async function runAssistantAgent(
   userId: string,
+  workspaceId: string,
   question: string,
   history: Array<{ role: "user" | "assistant"; content: string }> = [],
   attachments?: ChatAttachment[]
 ): Promise<AssistantAnswer> {
-  for await (const event of streamAssistantAgent(userId, question, history, attachments)) {
+  for await (const event of streamAssistantAgent(userId, workspaceId, question, history, attachments)) {
     if (event.type === "done") return event.data;
     if (event.type === "error") throw new Error(event.message);
   }

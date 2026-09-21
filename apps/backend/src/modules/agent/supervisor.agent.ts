@@ -9,6 +9,7 @@ import { gmailDraftMessageTool } from "./tools/gmail-draft.tool.js";
 import { linkedinDraftPostTool } from "./tools/linkedin-draft.tool.js";
 import { githubDraftIssueTool, githubDraftCommentTool } from "./tools/github-draft.tool.js";
 import { generateImageTool } from "./tools/generate-image.tool.js";
+import { listHrEmployeesTool, listHrEventsTool, listHrApplicantsTool, listHrJobsTool, hrOverviewTool } from "./tools/hr-data.tool.js";
 import { loadMcpToolsByName } from "../mcp/mcp-tool-adapter.js";
 import { nowContext } from "./now-context.js";
 
@@ -120,6 +121,19 @@ const GITHUB_PROMPT = [
   "so the draft goes through approval.",
 ].join("\n");
 
+const HR_PROMPT = [
+  "You are the Work workspace's HR Management agent.",
+  "Handle HR questions about candidates, CVs, employees, onboarding, policies, leave, interviews, performance, and HR events.",
+  "Use search_knowledge_base for HR resources and resumes in the active Work workspace before answering factual questions.",
+  "ALWAYS answer with real data from your tools. When the user asks what HR has, for all HR data, a summary, or an overview, call hr_overview and present the actual records grouped by People, Applicants, Jobs, Events, and Policies/Documents (say 'none yet' for empty groups).",
+  "Never reply with a description of your own capabilities or a menu of things you could do when information was requested - fetch it and show it.",
+  "Use hr_list_employees for current people records, hr_list_applicants for the recruitment pipeline, hr_list_jobs for open positions, and hr_list_events for internal HR calendar records; do not claim you cannot access HR records when those tools are available.",
+  "To assess or compare applicants, combine hr_list_applicants with search_knowledge_base on each applicant's name to read their CV.",
+  "Keep candidate and employee information confidential. Never make hiring, firing, compensation, or legal claims as a final decision.",
+  "When a request needs a policy or legal interpretation, state the uncertainty and recommend human HR review.",
+  "Only answer HR-related requests; route unrelated questions back to the supervisor.",
+].join("\n");
+
 // Which MCP tools each specialist owns (draft tools are backend tools, added below).
 const SPECIALIST_TOOL_PLAN: Record<string, { description: string; prompt: string; mcpToolNames: string[]; backendTools: string[] }> = {
   email_agent: {
@@ -164,10 +178,22 @@ const SPECIALIST_TOOL_PLAN: Record<string, { description: string; prompt: string
     mcpToolNames: [],
     backendTools: ["search_knowledge_base"],
   },
+  hr_agent: {
+    description:
+      "Work HR Management agent - handles CVs, applicants and job openings, employees, policies, onboarding, leave, performance, and HR events using the active Work workspace knowledge base.",
+    prompt: HR_PROMPT,
+    mcpToolNames: [],
+    backendTools: ["hr_overview", "search_knowledge_base", "hr_list_employees", "hr_list_applicants", "hr_list_jobs", "hr_list_events"],
+  },
 };
 
 const BACKEND_TOOLS: Record<string, StructuredToolInterface> = {
   search_knowledge_base: searchKnowledgeBaseTool,
+  hr_overview: hrOverviewTool,
+  hr_list_employees: listHrEmployeesTool,
+  hr_list_applicants: listHrApplicantsTool,
+  hr_list_jobs: listHrJobsTool,
+  hr_list_events: listHrEventsTool,
   gmail_draft_message: gmailDraftMessageTool,
   linkedin_draft_post: linkedinDraftPostTool,
   github_draft_issue: githubDraftIssueTool,
@@ -214,8 +240,15 @@ const SUPERVISOR_PROMPT = [
   "Routing: EMAIL for anything about email/inbox/drafts; CALENDAR for schedule/meetings/events; LINKEDIN for",
   "LinkedIn posts/content; GITHUB for repositories, issues, pull requests, and code review; KNOWLEDGE for the",
   "user's own background, past messages, schedule, or indexed content;",
+  "HR for Work workspace questions about candidates, CVs, employees, policies, onboarding, leave, performance, and HR events.",
   "WEB for current events, facts, outside-world research, images, attached-file analysis, and everything else.",
   "You may call more than one specialist for compound requests (e.g. research then draft an email).",
+  "",
+  "A specialist's tool result is a REPORT addressed to you, not a message from the user. Relay its findings to the",
+  "user directly and completely - include the actual records, lists, and numbers it returned rather than summarizing",
+  "them away. Never thank the specialist, compliment its summary, address it as 'you', or tell the user they",
+  "'already have' information they just asked for. If a report only lists capabilities instead of the data the user",
+  "asked for, call the specialist again and ask for the actual data.",
   "",
   "After the specialist returns, give the final answer yourself. Draft tools inside the specialists only queue",
   "for the user's approval in the app - NEVER say or imply an email was sent, a LinkedIn post was published, or",
@@ -236,6 +269,7 @@ function wrapSpecialistAsTool(specialist: SpecialistDef, collector: BaseMessage[
   return tool(
     async ({ input }: { input: string }, config) => {
       const userId = config?.configurable?.userId as string | undefined;
+      const workspaceId = config?.configurable?.workspaceId as string | undefined;
       let answer = "";
       // The date is prepended to this specialist's user-role message (not a
       // SystemMessage) on purpose: the Google model only promotes the FIRST
@@ -245,7 +279,7 @@ function wrapSpecialistAsTool(specialist: SpecialistDef, collector: BaseMessage[
       const datedInput = `Context for this run:\n${nowContext()}\n\nUser request:\n${input}`;
       const stream = await specialist.agent.stream(
         { messages: [new HumanMessage(datedInput)] },
-        { configurable: { userId, recursionLimit: 40 }, streamMode: "updates" }
+        { configurable: { userId, workspaceId }, recursionLimit: 40, streamMode: "updates" }
       );
       for await (const update of stream) {
         const nodeUpdates = update as Record<string, { messages?: BaseMessage[] } | undefined>;
@@ -253,13 +287,20 @@ function wrapSpecialistAsTool(specialist: SpecialistDef, collector: BaseMessage[
           if (!nodeUpdate?.messages) continue;
           for (const msg of nodeUpdate.messages) {
             collector.push(msg);
-            if (msg instanceof AIMessage && typeof msg.content === "string" && msg.content) {
-              answer = msg.content;
+            if (msg instanceof AIMessage && !msg.tool_calls?.length) {
+              // Gemini sometimes returns content as a list of parts rather than a string.
+              const text = typeof msg.content === "string"
+                ? msg.content
+                : msg.content.map((part) => ("text" in part && typeof part.text === "string" ? part.text : "")).join("");
+              if (text.trim()) answer = text;
             }
           }
         }
       }
-      return answer || `(${specialist.name} finished without an answer)`;
+      // Framed as a report so the supervisor relays it instead of replying to it as if the user had written it.
+      return answer
+        ? `[Report from ${specialist.name} - relay this to the user; the user has not seen it yet]\n\n${answer}`
+        : `(${specialist.name} finished without an answer)`;
     },
     {
       name: specialist.name,

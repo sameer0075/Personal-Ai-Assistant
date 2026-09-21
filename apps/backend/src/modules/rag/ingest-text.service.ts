@@ -11,6 +11,7 @@ export interface IngestResult {
 
 export interface IngestTextParams {
   userId: string;
+  workspaceId: string;
   text: string;
   title: string;
   sourceType: SourceType;
@@ -19,12 +20,12 @@ export interface IngestTextParams {
 }
 
 export async function ingestText(params: IngestTextParams): Promise<IngestResult> {
-  const { userId, text, title, sourceType, metadata = {}, file } = params;
+  const { userId, workspaceId, text, title, sourceType, metadata = {}, file } = params;
   if (!text.trim()) throw new Error(`No text to ingest for "${title}"`);
 
   const chunks = chunkText(text);
   const embeddings = await embeddingService.embedBatch(chunks);
-  const document = await documentRepository.createDocument(userId, title, sourceType, metadata, file);
+  const document = await documentRepository.createDocument(userId, workspaceId, title, sourceType, metadata, file);
 
   await documentRepository.insertChunks(
     document.id,

@@ -2,33 +2,33 @@ import { pool } from "../../config/database.js";
 import type { ChatSession, ChatMessageRecord, ToolCallTrace, ChatAttachment } from "../../types/index.js";
 
 export const chatSessionRepository = {
-  async createSession(userId: string, title: string = "New Chat"): Promise<ChatSession> {
+  async createSession(userId: string, workspaceId: string, title: string = "New Chat"): Promise<ChatSession> {
     const { rows } = await pool.query<ChatSession>(
-      `INSERT INTO chat_sessions (user_id, title) VALUES ($1, $2)
+      `INSERT INTO chat_sessions (user_id, workspace_id, title) VALUES ($1, $2, $3)
        RETURNING id, title, created_at AS "createdAt", updated_at AS "updatedAt"`,
-      [userId, title]
+      [userId, workspaceId, title]
     );
     return rows[0];
   },
 
-  async getSession(id: string, userId: string): Promise<ChatSession | null> {
+  async getSession(id: string, userId: string, workspaceId: string): Promise<ChatSession | null> {
     const { rows } = await pool.query<ChatSession>(
-      `SELECT id, title, created_at AS "createdAt", updated_at AS "updatedAt" FROM chat_sessions WHERE id = $1 AND user_id = $2`,
-      [id, userId]
+      `SELECT id, title, created_at AS "createdAt", updated_at AS "updatedAt" FROM chat_sessions WHERE id = $1 AND user_id = $2 AND workspace_id = $3`,
+      [id, userId, workspaceId]
     );
     return rows[0] ?? null;
   },
 
-  async listSessions(userId: string): Promise<ChatSession[]> {
+  async listSessions(userId: string, workspaceId: string): Promise<ChatSession[]> {
     const { rows } = await pool.query<ChatSession>(
-      `SELECT id, title, created_at AS "createdAt", updated_at AS "updatedAt" FROM chat_sessions WHERE user_id = $1 ORDER BY updated_at DESC`,
-      [userId]
+      `SELECT id, title, created_at AS "createdAt", updated_at AS "updatedAt" FROM chat_sessions WHERE user_id = $1 AND workspace_id = $2 ORDER BY updated_at DESC`,
+      [userId, workspaceId]
     );
     return rows;
   },
 
-  async deleteSession(id: string, userId: string): Promise<void> {
-    await pool.query(`DELETE FROM chat_sessions WHERE id = $1 AND user_id = $2`, [id, userId]);
+  async deleteSession(id: string, userId: string, workspaceId: string): Promise<void> {
+    await pool.query(`DELETE FROM chat_sessions WHERE id = $1 AND user_id = $2 AND workspace_id = $3`, [id, userId, workspaceId]);
   },
 
   async setTitleIfDefault(id: string, title: string): Promise<void> {

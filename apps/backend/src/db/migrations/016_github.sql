@@ -14,4 +14,4 @@ CREATE TABLE IF NOT EXISTS github_credentials (
 ALTER TABLE pending_actions DROP CONSTRAINT IF EXISTS pending_actions_type_check;
 ALTER TABLE pending_actions
   ADD CONSTRAINT pending_actions_type_check
-  CHECK (type IN ('email', 'linkedin_post', 'github_issue', 'github_comment'));
+  CHECK (type IN ('email', 'linkedin_post', 'github_issue', 'github_comment', 'hr_event_invite'));

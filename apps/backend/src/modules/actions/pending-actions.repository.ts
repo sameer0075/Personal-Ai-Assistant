@@ -3,6 +3,7 @@ import type { PendingAction, PendingActionType, PendingActionStatus } from "../.
 
 interface PendingActionRow {
   id: string;
+  workspaceId: string | null;
   type: PendingActionType;
   status: PendingActionStatus;
   payload: PendingAction["payload"];
@@ -13,22 +14,23 @@ interface PendingActionRow {
 }
 
 const SELECT_COLUMNS = `
-  id, type, status, payload, created_by AS "createdBy", result,
+  id, workspace_id AS "workspaceId", type, status, payload, created_by AS "createdBy", result,
   created_at AS "createdAt", decided_at AS "decidedAt"
 `;
 
 export const pendingActionsRepository = {
   async create(params: {
     userId: string;
+    workspaceId: string;
     type: PendingActionType;
     payload: Record<string, unknown>;
     createdBy: "agent" | "user";
   }): Promise<PendingAction> {
     const { rows } = await pool.query<PendingActionRow>(
-      `INSERT INTO pending_actions (user_id, type, payload, created_by)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO pending_actions (user_id, workspace_id, type, payload, created_by)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING ${SELECT_COLUMNS}`,
-      [params.userId, params.type, JSON.stringify(params.payload), params.createdBy]
+      [params.userId, params.workspaceId, params.type, JSON.stringify(params.payload), params.createdBy]
     );
     return rows[0];
   },
@@ -42,10 +44,12 @@ export const pendingActionsRepository = {
     return rows[0] ?? null;
   },
 
-  async listPending(userId: string): Promise<PendingAction[]> {
+  async listPending(userId: string, workspaceId: string): Promise<PendingAction[]> {
     const { rows } = await pool.query<PendingActionRow>(
-      `SELECT ${SELECT_COLUMNS} FROM pending_actions WHERE status = 'pending' AND user_id = $1 ORDER BY created_at DESC`,
-      [userId]
+      `SELECT ${SELECT_COLUMNS} FROM pending_actions
+       WHERE status = 'pending' AND user_id = $1 AND workspace_id = $2
+       ORDER BY created_at DESC`,
+      [userId, workspaceId]
     );
     return rows;
   },

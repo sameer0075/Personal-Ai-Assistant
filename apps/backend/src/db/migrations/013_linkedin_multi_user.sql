@@ -5,7 +5,14 @@ ALTER TABLE linkedin_credentials DROP CONSTRAINT IF EXISTS linkedin_credentials_
 ALTER TABLE linkedin_credentials ALTER COLUMN user_label DROP NOT NULL;
 ALTER TABLE linkedin_credentials ALTER COLUMN user_label DROP DEFAULT;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_linkedin_credentials_user_id ON linkedin_credentials (user_id);
+-- Superseded by per-workspace uniqueness in 018; skip once linkedin_credentials is workspace-scoped
+-- so re-running migrations doesn't fail when a user has one account per workspace.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'linkedin_credentials' AND column_name = 'workspace_id') THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_linkedin_credentials_user_id ON linkedin_credentials (user_id);
+  END IF;
+END $$;
 
 ALTER TABLE linkedin_posts ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_linkedin_posts_user_id ON linkedin_posts (user_id);

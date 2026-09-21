@@ -23,7 +23,7 @@ const bulkSendSchema = z.object({
 gmailRoutes.get("/messages", async (req, res) => {
   try {
     const { query, maxResults } = listQuerySchema.parse(req.query);
-    const json = await callMcpTool("gmail_list_messages", { query, maxResults, userId: req.userId! });
+    const json = await callMcpTool("gmail_list_messages", { query, maxResults, userId: req.userId!, workspaceId: req.workspaceId! });
     res.json(JSON.parse(json));
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to list messages" });
@@ -33,7 +33,7 @@ gmailRoutes.get("/messages", async (req, res) => {
 /** GET /api/gmail/messages/:id */
 gmailRoutes.get("/messages/:id", async (req, res) => {
   try {
-    const json = await callMcpTool("gmail_get_message", { messageId: req.params.id, userId: req.userId! });
+    const json = await callMcpTool("gmail_get_message", { messageId: req.params.id, userId: req.userId!, workspaceId: req.workspaceId! });
     res.json(JSON.parse(json));
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to fetch message" });
@@ -52,7 +52,7 @@ const sendSchema = z.object({
 gmailRoutes.post("/send", async (req, res) => {
   try {
     const input = sendSchema.parse(req.body);
-    const json = await callMcpTool("gmail_send_message", { ...input, userId: req.userId! });
+    const json = await callMcpTool("gmail_send_message", { ...input, userId: req.userId!, workspaceId: req.workspaceId! });
     res.status(201).json(JSON.parse(json));
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to send message" });
@@ -72,7 +72,7 @@ const syncSchema = z.object({
 gmailRoutes.post("/sync-to-rag", async (req, res) => {
   try {
     const input = syncSchema.parse(req.body);
-    const summary = await syncGmailToRag(req.userId!, input);
+    const summary = await syncGmailToRag(req.userId!, req.workspaceId!, input);
     res.json(summary);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to sync Gmail to RAG" });
@@ -82,7 +82,7 @@ gmailRoutes.post("/sync-to-rag", async (req, res) => {
 gmailRoutes.post("/send-bulk", async (req, res) => {
   try {
     const input = bulkSendSchema.parse(req.body);
-    const json = await callMcpTool("gmail_send_bulk", { ...input, userId: req.userId! });
+    const json = await callMcpTool("gmail_send_bulk", { ...input, userId: req.userId!, workspaceId: req.workspaceId! });
     res.status(201).json(JSON.parse(json));
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to send bulk messages" });

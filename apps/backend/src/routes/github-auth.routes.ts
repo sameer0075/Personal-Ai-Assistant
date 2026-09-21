@@ -13,7 +13,7 @@ const connectSchema = z.object({
 githubRoutes.post("/connect", requireAuth, async (req, res) => {
   try {
     const { token } = connectSchema.parse(req.body);
-    const status = await connectGithub(req.userId!, token);
+    const status = await connectGithub(req.userId!, req.workspaceId!, token);
     res.json(status);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to connect GitHub" });
@@ -23,7 +23,7 @@ githubRoutes.post("/connect", requireAuth, async (req, res) => {
 /** GET /api/github - has the current user connected a GitHub account? */
 githubRoutes.get("/", requireAuth, async (req, res) => {
   try {
-    res.json(await getGithubStatus(req.userId!));
+    res.json(await getGithubStatus(req.userId!, req.workspaceId!));
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load GitHub status" });
   }
@@ -32,7 +32,7 @@ githubRoutes.get("/", requireAuth, async (req, res) => {
 /** POST /api/github/sync - index the user's open issues into search. */
 githubRoutes.post("/sync", requireAuth, async (req, res) => {
   try {
-    const result = await syncGithub(req.userId!);
+    const result = await syncGithub(req.userId!, req.workspaceId!);
     res.json(result);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to sync GitHub" });
@@ -42,7 +42,7 @@ githubRoutes.post("/sync", requireAuth, async (req, res) => {
 /** DELETE /api/github - revoke locally stored GitHub credentials. */
 githubRoutes.delete("/", requireAuth, async (req, res) => {
   try {
-    await disconnectGithub(req.userId!);
+    await disconnectGithub(req.userId!, req.workspaceId!);
     res.status(204).end();
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to disconnect GitHub" });

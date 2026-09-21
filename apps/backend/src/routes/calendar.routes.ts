@@ -17,7 +17,7 @@ const listQuerySchema = z.object({
 calendarRoutes.get("/events", async (req, res) => {
   try {
     const { timeMin, timeMax, maxResults } = listQuerySchema.parse(req.query);
-    const json = await callMcpTool("calendar_list_events", { timeMin, timeMax, maxResults, userId: req.userId! });
+    const json = await callMcpTool("calendar_list_events", { timeMin, timeMax, maxResults, userId: req.userId!, workspaceId: req.workspaceId! });
     res.json(JSON.parse(json));
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to list events" });
@@ -37,7 +37,7 @@ const createEventSchema = z.object({
 calendarRoutes.post("/events", async (req, res) => {
   try {
     const input = createEventSchema.parse(req.body);
-    const json = await callMcpTool("calendar_create_event", { ...input, userId: req.userId! });
+    const json = await callMcpTool("calendar_create_event", { ...input, userId: req.userId!, workspaceId: req.workspaceId! });
     res.status(201).json(JSON.parse(json));
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to create event" });
@@ -47,7 +47,7 @@ calendarRoutes.post("/events", async (req, res) => {
 /** DELETE /api/calendar/events/:id */
 calendarRoutes.delete("/events/:id", async (req, res) => {
   try {
-    await callMcpTool("calendar_delete_event", { eventId: req.params.id, userId: req.userId! });
+    await callMcpTool("calendar_delete_event", { eventId: req.params.id, userId: req.userId!, workspaceId: req.workspaceId! });
     res.status(204).end();
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to delete event" });
@@ -64,7 +64,7 @@ const syncSchema = z.object({
 calendarRoutes.post("/sync-to-rag", async (req, res) => {
   try {
     const input = syncSchema.parse(req.body);
-    const summary = await syncCalendarToRag(req.userId!, input);
+    const summary = await syncCalendarToRag(req.userId!, req.workspaceId!, input);
     res.json(summary);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to sync Calendar to RAG" });

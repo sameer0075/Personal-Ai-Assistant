@@ -2,11 +2,15 @@ import express from "express";
 import cors from "cors";
 import { env } from "./config/env.js";
 import { apiRouter } from "./routes/index.js";
+import { careersRoutes } from "./routes/careers.routes.js";
 
 export function createApp() {
   const app = express();
 
   app.disable("x-powered-by");
+  // Public career-site intake accepts any origin, so it's mounted before the
+  // app-wide CORS policy that locks everything else to the frontend.
+  app.use("/api/public/careers", careersRoutes);
   app.use(cors({ origin: env.CORS_ORIGIN }));
   app.use(express.json({ limit: "2mb" }));
 

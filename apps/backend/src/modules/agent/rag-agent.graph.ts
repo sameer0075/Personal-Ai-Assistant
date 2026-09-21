@@ -15,13 +15,14 @@ import type { ChatAnswer, RetrievedChunk } from "../../types/index.js";
  */
 const RagState = Annotation.Root({
   userId: Annotation<string>(),
+  workspaceId: Annotation<string>(),
   question: Annotation<string>(),
   retrievedChunks: Annotation<RetrievedChunk[]>({ default: () => [], reducer: (_, next) => next }),
   answer: Annotation<string>({ default: () => "", reducer: (_, next) => next }),
 });
 
 async function retrieveNode(state: typeof RagState.State) {
-  const chunks = await retrieveRelevantChunks(state.userId, state.question);
+  const chunks = await retrieveRelevantChunks(state.userId, state.workspaceId, state.question);
   return { retrievedChunks: chunks };
 }
 
@@ -58,8 +59,8 @@ const graph = new StateGraph(RagState)
 
 const compiledGraph = graph.compile();
 
-export async function runRagAgent(userId: string, question: string): Promise<ChatAnswer> {
-  const result = await compiledGraph.invoke({ userId, question });
+export async function runRagAgent(userId: string, workspaceId: string, question: string): Promise<ChatAnswer> {
+  const result = await compiledGraph.invoke({ userId, workspaceId, question });
 
   const sources = await Promise.all(
     result.retrievedChunks.map(async (c) => ({

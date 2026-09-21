@@ -11,9 +11,15 @@ function requireUserId(config?: RunnableConfig): string {
   return userId;
 }
 
+function requireWorkspaceId(config?: RunnableConfig): string {
+  const workspaceId = (config?.configurable as { workspaceId?: string } | undefined)?.workspaceId;
+  if (!workspaceId) throw new Error("Called without a workspaceId in context - this is a bug, not a user-facing error.");
+  return workspaceId;
+}
+
 export const githubDraftIssueTool = tool(
   async ({ repo, title, body }: { repo: string; title: string; body: string }, config?: RunnableConfig) => {
-    const action = await createGithubIssueDraft(requireUserId(config), { repo, title, body });
+    const action = await createGithubIssueDraft(requireUserId(config), requireWorkspaceId(config), { repo, title, body });
     return JSON.stringify({
       drafted: true,
       pendingActionId: action.id,
@@ -36,7 +42,7 @@ export const githubDraftIssueTool = tool(
 
 export const githubDraftCommentTool = tool(
   async ({ repo, issueNumber, body }: { repo: string; issueNumber: number; body: string }, config?: RunnableConfig) => {
-    const action = await createGithubCommentDraft(requireUserId(config), { repo, issueNumber, body });
+    const action = await createGithubCommentDraft(requireUserId(config), requireWorkspaceId(config), { repo, issueNumber, body });
     return JSON.stringify({
       drafted: true,
       pendingActionId: action.id,

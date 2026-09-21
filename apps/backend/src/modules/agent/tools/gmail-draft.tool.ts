@@ -9,11 +9,11 @@ export const gmailDraftMessageTool = tool(
     config?: RunnableConfig
   ) => {
     const userId: any = config?.configurable?.userId as string | undefined;
-    if (!userId) {
+    if (!userId || !config?.configurable?.workspaceId) {
       throw new Error("gmail_draft_message called without a userId in context - this is a bug, not a user-facing error.");
     }
 
-    const action = await createEmailDraft(userId, { to, subject, body, cc, attachCv });
+    const action = await createEmailDraft(userId, config?.configurable?.workspaceId as string, { to, subject, body, cc, attachCv });
     return JSON.stringify({
       drafted: true,
       pendingActionId: action.id,

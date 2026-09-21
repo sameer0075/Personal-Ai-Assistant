@@ -1,5 +1,5 @@
 export type SourceType = "cv" | "email" | "pr" | "linkedin" | "calendar" | "general" | "conversation" | "github";
-export type PendingActionType = "email" | "linkedin_post" | "github_issue" | "github_comment";
+export type PendingActionType = "email" | "linkedin_post" | "github_issue" | "github_comment" | "hr_event_invite";
 export type PendingActionStatus = "pending" | "approved" | "rejected";
 
 export interface AuthUser {
@@ -70,11 +70,28 @@ export interface GithubCommentActionPayload {
   body: string;
 }
 
+/** Calendar invite + personal email to selected employees for one HR event. */
+export interface HrEventInvitePayload {
+  hrEventId: string;
+  summary: string;
+  description?: string;
+  startDateTime: string;
+  endDateTime: string;
+  timeZone?: string;
+  recipients: Array<{ employeeId: string; name: string; email: string }>;
+  addToCalendar: boolean;
+  sendEmail: boolean;
+  emailSubject?: string;
+  /** "{name}" is replaced with each recipient's first name. */
+  emailBody?: string;
+}
+
 export interface PendingAction {
   id: string;
+  workspaceId?: string | null;
   type: PendingActionType;
   status: PendingActionStatus;
-  payload: EmailActionPayload | LinkedinActionPayload | GithubIssueActionPayload | GithubCommentActionPayload;
+  payload: EmailActionPayload | LinkedinActionPayload | GithubIssueActionPayload | GithubCommentActionPayload | HrEventInvitePayload;
   createdBy: "agent" | "user";
   result: Record<string, unknown> | null;
   createdAt: string;
@@ -182,6 +199,7 @@ export type DeliveryMode = "chat" | "email" | "both";
 export interface ScheduledTask {
   id: string;
   userId: string;
+  workspaceId: string;
   title: string;
   prompt: string;
   scheduleKind: ScheduleKind;

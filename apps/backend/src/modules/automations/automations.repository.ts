@@ -4,6 +4,7 @@ import type { ScheduledTask } from "../../types/index.js";
 const SCHEDULED_TASK_COLUMNS = `
   id,
   user_id AS "userId",
+  workspace_id AS "workspaceId",
   title,
   prompt,
   schedule_kind AS "scheduleKind",
@@ -24,6 +25,7 @@ const SCHEDULED_TASK_COLUMNS = `
 
 export interface CreateScheduledTask {
   userId: string;
+  workspaceId: string;
   title: string;
   prompt: string;
   scheduleKind: ScheduledTask["scheduleKind"];
@@ -56,12 +58,12 @@ export const automationsRepository = {
   async create(params: CreateScheduledTask): Promise<ScheduledTask> {
     const { rows } = await pool.query<ScheduledTask>(
       `INSERT INTO scheduled_tasks
-         (user_id, title, prompt, schedule_kind, cron_expr, interval_minutes, timezone, trigger_at,
+         (user_id, workspace_id, title, prompt, schedule_kind, cron_expr, interval_minutes, timezone, trigger_at,
           delivery_mode, email_to, email_subject, deliver_to_session_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING ${SCHEDULED_TASK_COLUMNS}`,
       [
-        params.userId, params.title, params.prompt, params.scheduleKind,
+        params.userId, params.workspaceId, params.title, params.prompt, params.scheduleKind,
         params.cronExpr, params.intervalMinutes, params.timezone, params.triggerAt,
         params.deliveryMode, params.emailTo, params.emailSubject,
         params.deliverToSessionId,
@@ -70,23 +72,23 @@ export const automationsRepository = {
     return rows[0];
   },
 
-  async list(userId: string): Promise<ScheduledTask[]> {
+  async list(userId: string, workspaceId: string): Promise<ScheduledTask[]> {
     const { rows } = await pool.query<ScheduledTask>(
-      `SELECT ${SCHEDULED_TASK_COLUMNS} FROM scheduled_tasks WHERE user_id = $1 ORDER BY trigger_at ASC`,
-      [userId]
+      `SELECT ${SCHEDULED_TASK_COLUMNS} FROM scheduled_tasks WHERE user_id = $1 AND workspace_id = $2 ORDER BY trigger_at ASC`,
+      [userId, workspaceId]
     );
     return rows;
   },
 
-  async get(id: string, userId: string): Promise<ScheduledTask | null> {
+  async get(id: string, userId: string, workspaceId: string): Promise<ScheduledTask | null> {
     const { rows } = await pool.query<ScheduledTask>(
-      `SELECT ${SCHEDULED_TASK_COLUMNS} FROM scheduled_tasks WHERE id = $1 AND user_id = $2`,
-      [id, userId]
+      `SELECT ${SCHEDULED_TASK_COLUMNS} FROM scheduled_tasks WHERE id = $1 AND user_id = $2 AND workspace_id = $3`,
+      [id, userId, workspaceId]
     );
     return rows[0] ?? null;
   },
 
-  async update(id: string, userId: string, patch: UpdateScheduledTask): Promise<ScheduledTask | null> {
+  async update(id: string, userId: string, workspaceId: string, patch: UpdateScheduledTask): Promise<ScheduledTask | null> {
     const { rows } = await pool.query<ScheduledTask>(
       `UPDATE scheduled_tasks SET
          title = COALESCE($3, title),
@@ -102,10 +104,10 @@ export const automationsRepository = {
          email_subject = COALESCE($13, email_subject),
          deliver_to_session_id = COALESCE($14, deliver_to_session_id),
          updated_at = now()
-       WHERE id = $1 AND user_id = $2
+      WHERE id = $1 AND user_id = $2 AND workspace_id = $3
        RETURNING ${SCHEDULED_TASK_COLUMNS}`,
       [
-        id, userId,
+        id, userId, workspaceId,
         patch.title ?? null, patch.prompt ?? null, patch.scheduleKind ?? null,
         patch.cronExpr ?? null, patch.intervalMinutes ?? null, patch.timezone ?? null,
         patch.triggerAt ?? null, patch.enabled ?? null,
@@ -116,8 +118,8 @@ export const automationsRepository = {
     return rows[0] ?? null;
   },
 
-  async remove(id: string, userId: string): Promise<boolean> {
-    const { rowCount } = await pool.query(`DELETE FROM scheduled_tasks WHERE id = $1 AND user_id = $2`, [id, userId]);
+  async remove(id: string, userId: string, workspaceId: string): Promise<boolean> {
+    const { rowCount } = await pool.query(`DELETE FROM scheduled_tasks WHERE id = $1 AND user_id = $2 AND workspace_id = $3`, [id, userId, workspaceId]);
     return (rowCount ?? 0) > 0;
   },
 

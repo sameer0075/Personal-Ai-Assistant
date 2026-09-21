@@ -23,13 +23,13 @@ const AUTHORIZATION_ENDPOINT = "https://www.linkedin.com/oauth/v2/authorization"
 const TOKEN_ENDPOINT = "https://www.linkedin.com/oauth/v2/accessToken";
 const USERINFO_ENDPOINT = "https://api.linkedin.com/v2/userinfo";
 
-export function buildLinkedinConsentUrl(userId: string): string {
+export function buildLinkedinConsentUrl(userId: string, workspaceId: string): string {
   const params = new URLSearchParams({
     response_type: "code",
     client_id: env.LINKEDIN_OAUTH_CLIENT_ID,
     redirect_uri: env.LINKEDIN_OAUTH_REDIRECT_URI,
     scope: LINKEDIN_SCOPES.join(" "),
-    state: signOAuthState(userId, OAUTH_STATE_PURPOSE),
+    state: signOAuthState(userId, workspaceId, OAUTH_STATE_PURPOSE),
   });
   return `${AUTHORIZATION_ENDPOINT}?${params.toString()}`;
 }
@@ -54,7 +54,7 @@ export async function handleLinkedinOAuthCallback(
   code: string,
   state: string | undefined
 ): Promise<{ personUrn: string }> {
-  const userId = verifyOAuthState(state, OAUTH_STATE_PURPOSE);
+  const { userId, workspaceId } = verifyOAuthState(state, OAUTH_STATE_PURPOSE);
 
   const tokenResponse = await fetch(TOKEN_ENDPOINT, {
     method: "POST",
@@ -85,7 +85,7 @@ export async function handleLinkedinOAuthCallback(
   const userInfo = (await userInfoResponse.json()) as LinkedinUserInfo;
   const personUrn = `urn:li:person:${userInfo.sub}`;
 
-  await linkedinCredentialsRepository.upsert(userId, {
+  await linkedinCredentialsRepository.upsert(userId, workspaceId, {
     personUrn,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token ?? null,

@@ -24,6 +24,7 @@ export interface UnifiedSearchOptions {
  */
 export async function unifiedSearch(
   userId: string,
+  workspaceId: string,
   rawQuery: string,
   options: UnifiedSearchOptions = {}
 ): Promise<UnifiedSearchResult> {
@@ -38,10 +39,10 @@ export async function unifiedSearch(
 
   // 1. Keyword search across the directly-searchable text columns, in parallel.
   const [chatRows, documentTitles, linkedinPosts, keywordChunks] = await Promise.all([
-    searchRepository.searchChatMessages(userId, query, limit),
-    searchRepository.searchDocumentsByTitle(userId, query, limit),
-    searchRepository.searchLinkedinPosts(userId, query, limit),
-    searchRepository.searchChunksByKeyword(userId, query, limit),
+    searchRepository.searchChatMessages(userId, workspaceId, query, limit),
+    searchRepository.searchDocumentsByTitle(userId, workspaceId, query, limit),
+    searchRepository.searchLinkedinPosts(userId, workspaceId, query, limit),
+    searchRepository.searchChunksByKeyword(userId, workspaceId, query, limit),
   ]);
 
   // 2. Semantic search over the pgvector index. Best-effort: if the embedding
@@ -50,7 +51,7 @@ export async function unifiedSearch(
   let semanticChunks: ChunkSearchRow[] = [];
   try {
     const queryEmbedding = await embeddingService.embed(query);
-    const hits = await searchRepository.searchSimilarChunks(userId, queryEmbedding, limit * 2);
+    const hits = await searchRepository.searchSimilarChunks(userId, workspaceId, queryEmbedding, limit * 2);
     semanticChunks = hits.filter((row) => Number(row.similarity) >= MIN_SEMANTIC_SIMILARITY);
   } catch (err) {
     console.error("[search] semantic search unavailable (showing keyword results only):", err);

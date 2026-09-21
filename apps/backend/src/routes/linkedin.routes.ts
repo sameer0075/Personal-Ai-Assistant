@@ -60,7 +60,7 @@ const syncSchema = z.object({
 linkedinRoutes.post("/sync-to-rag", async (req, res) => {
   try {
     const { maxResults } = syncSchema.parse(req.body);
-    const summary = await syncLinkedinToRag(req.userId!, { maxResults });
+    const summary = await syncLinkedinToRag(req.userId!, req.workspaceId!, { maxResults });
     res.json(summary);
   } catch (err) {
     res.status(422).json({ error: err instanceof Error ? err.message : "Failed to sync LinkedIn to RAG" });

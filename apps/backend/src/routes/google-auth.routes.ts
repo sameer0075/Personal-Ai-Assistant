@@ -8,16 +8,16 @@ import { requireAuth } from "../modules/auth/auth.middleware.js";
 export const googleAuthRoutes = Router();
 
 googleAuthRoutes.get("/auth-url", requireAuth, (req, res) => {
-  res.json({ url: buildGoogleConsentUrl(req.userId!) });
+  res.json({ url: buildGoogleConsentUrl(req.userId!, req.workspaceId!) });
 });
 
 googleAuthRoutes.get("/status", requireAuth, async (req, res) => {
-  const status = await googleCredentialsRepository.getStatus(req.userId!);
+  const status = await googleCredentialsRepository.getStatus(req.userId!, req.workspaceId!);
   res.json(status);
 });
 
 googleAuthRoutes.post("/disconnect", requireAuth, async (req, res) => {
-  await googleCredentialsRepository.disconnect(req.userId!);
+  await googleCredentialsRepository.disconnect(req.userId!, req.workspaceId!);
   res.status(204).end();
 });
 

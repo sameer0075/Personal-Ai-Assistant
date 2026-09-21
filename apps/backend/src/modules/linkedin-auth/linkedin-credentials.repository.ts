@@ -12,6 +12,7 @@ export interface LinkedinConnectionStatus {
 export const linkedinCredentialsRepository = {
   async upsert(
     userId: string,
+    workspaceId: string,
     params: {
       personUrn: string;
       accessToken: string;
@@ -27,9 +28,9 @@ export const linkedinCredentialsRepository = {
 
     await pool.query(
       `INSERT INTO linkedin_credentials
-         (user_id, person_urn, access_token_encrypted, refresh_token_encrypted, expires_at, granted_scopes, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now())
-       ON CONFLICT (user_id)
+         (user_id, workspace_id, person_urn, access_token_encrypted, refresh_token_encrypted, expires_at, granted_scopes, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+       ON CONFLICT (workspace_id)
        DO UPDATE SET
          person_urn = EXCLUDED.person_urn,
          access_token_encrypted = EXCLUDED.access_token_encrypted,
@@ -37,14 +38,14 @@ export const linkedinCredentialsRepository = {
          expires_at = EXCLUDED.expires_at,
          granted_scopes = EXCLUDED.granted_scopes,
          updated_at = now()`,
-      [userId, params.personUrn, accessEncrypted, refreshEncrypted, params.expiresAt, params.scopes]
+      [userId, workspaceId, params.personUrn, accessEncrypted, refreshEncrypted, params.expiresAt, params.scopes]
     );
   },
 
-  async getStatus(userId: string): Promise<LinkedinConnectionStatus> {
+  async getStatus(userId: string, workspaceId: string): Promise<LinkedinConnectionStatus> {
     const { rows } = await pool.query<{ person_urn: string; granted_scopes: string[]; expires_at: string }>(
-      `SELECT person_urn, granted_scopes, expires_at FROM linkedin_credentials WHERE user_id = $1`,
-      [userId]
+      `SELECT person_urn, granted_scopes, expires_at FROM linkedin_credentials WHERE user_id = $1 AND workspace_id = $2`,
+      [userId, workspaceId]
     );
     if (!rows[0]) return { connected: false, personUrn: null, grantedScopes: [], expiresAt: null };
     return {
@@ -55,7 +56,7 @@ export const linkedinCredentialsRepository = {
     };
   },
 
-  async disconnect(userId: string): Promise<void> {
-    await pool.query(`DELETE FROM linkedin_credentials WHERE user_id = $1`, [userId]);
+  async disconnect(userId: string, workspaceId: string): Promise<void> {
+    await pool.query(`DELETE FROM linkedin_credentials WHERE user_id = $1 AND workspace_id = $2`, [userId, workspaceId]);
   },
 };

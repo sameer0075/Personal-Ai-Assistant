@@ -14,6 +14,8 @@ import { searchRoutes } from "./search.routes.js";
 import { automationsRoutes } from "./automations.routes.js";
 import { githubRoutes } from "./github-auth.routes.js";
 import { imageRoutes } from "./images.routes.js";
+import { workspacesRoutes } from "./workspaces.routes.js";
+import { hrRoutes } from "./hr.routes.js";
 
 export const apiRouter = Router();
 
@@ -32,3 +34,5 @@ apiRouter.use("/search", searchRoutes);
 apiRouter.use("/automations", automationsRoutes);
 apiRouter.use("/github", githubRoutes);
 apiRouter.use("/images", imageRoutes);
+apiRouter.use("/workspaces", workspacesRoutes);
+apiRouter.use("/hr", hrRoutes);

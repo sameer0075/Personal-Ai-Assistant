@@ -29,7 +29,7 @@ searchRoutes.get("/", async (req, res) => {
     }
 
     const options: UnifiedSearchOptions = parsed.data.limit !== undefined ? { limit: parsed.data.limit } : {};
-    res.json(await unifiedSearch(req.userId!, parsed.data.q, options));
+    res.json(await unifiedSearch(req.userId!, req.workspaceId!, parsed.data.q, options));
   } catch (err) {
     console.error("[search] unable to run unified search:", err);
     res.status(500).json({ error: "Search failed" });
